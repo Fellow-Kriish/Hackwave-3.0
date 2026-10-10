@@ -1,0 +1,82 @@
+{
+  "intentId": "checkout-valid-card",
+  "goalHash": "42646300fc554447c62459c09323e1edc6cf86d228b65205616093c8c7596d70",
+  "promptHash": "hand-written",
+  "createdAt": "2026-10-11T00:00:00.000Z",
+  "milestones": [
+    {
+      "key": "cart",
+      "description": "Put the product in the cart and open the cart.",
+      "dependsOn": [],
+      "completion": { "kind": "heading", "text": "Your cart" },
+      "steps": [
+        {
+          "key": "cart.add",
+          "action": "click",
+          "target": {
+            "role": "button",
+            "name": "Add to cart",
+            "within": { "role": "article", "nameRef": "product" },
+            "hint": "adds the product to the cart"
+          }
+        },
+        {
+          "key": "cart.open",
+          "action": "click",
+          "target": { "role": "button", "name": "Cart (1)", "synonyms": ["Cart", "Basket", "Bag"], "hint": "opens the cart" }
+        }
+      ]
+    },
+    {
+      "key": "checkout",
+      "description": "Start checkout from the cart.",
+      "dependsOn": ["cart"],
+      "completion": { "kind": "heading", "text": "Checkout" },
+      "steps": [
+        {
+          "key": "checkout.start",
+          "action": "click",
+          "target": { "role": "button", "name": "Checkout", "synonyms": ["Proceed to checkout"], "hint": "starts checkout" }
+        }
+      ]
+    },
+    {
+      "key": "payment",
+      "description": "Enter the credit card details.",
+      "dependsOn": ["checkout"],
+      "completion": { "kind": "filled" },
+      "steps": [
+        { "key": "payment.number", "action": "fill", "target": { "role": "textbox", "name": "Card number" }, "inputRef": "card.number" },
+        { "key": "payment.expiry", "action": "fill", "target": { "role": "textbox", "name": "Expiry (MM/YY)" }, "inputRef": "card.expiry" },
+        { "key": "payment.cvv", "action": "fill", "target": { "role": "textbox", "name": "CVV" }, "inputRef": "card.cvv" },
+        { "key": "payment.name", "action": "fill", "target": { "role": "textbox", "name": "Name on card" }, "inputRef": "card.name" }
+      ]
+    },
+    {
+      "key": "shipping",
+      "description": "Enter the shipping address.",
+      "dependsOn": ["checkout"],
+      "completion": { "kind": "filled" },
+      "steps": [
+        { "key": "shipping.name", "action": "fill", "target": { "role": "textbox", "name": "Full name" }, "inputRef": "shipping.name" },
+        { "key": "shipping.street", "action": "fill", "target": { "role": "textbox", "name": "Street address" }, "inputRef": "shipping.street" },
+        { "key": "shipping.city", "action": "fill", "target": { "role": "textbox", "name": "City" }, "inputRef": "shipping.city" },
+        { "key": "shipping.pincode", "action": "fill", "target": { "role": "textbox", "name": "Pincode" }, "inputRef": "shipping.pincode" }
+      ]
+    },
+    {
+      "key": "place-order",
+      "description": "Place the order and reach the confirmation.",
+      "dependsOn": ["payment", "shipping"],
+      "completion": { "kind": "heading", "text": "Order confirmed" },
+      "terminal": true,
+      "steps": [
+        {
+          "key": "place-order.submit",
+          "action": "click",
+          "target": { "role": "button", "name": "Place order", "synonyms": ["Pay", "Buy now"], "hint": "submits the order" }
+        }
+      ]
+    }
+  ]
+}

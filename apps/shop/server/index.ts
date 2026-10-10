@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseShopVersion } from '../shared/variants';
 import { createApp } from './app';
 import { APP_ROOT, readShopPorts } from './paths';
@@ -16,9 +16,12 @@ if (!existsSync(join(distDir, 'index.html'))) {
   throw new Error('Front end not built. Run: pnpm --filter @hackwave/shop build');
 }
 
+// SHOP_DATA_DIR lets a private instance (e.g. one an eval kills mid-run) keep its own store file.
+const dataDir = process.env.SHOP_DATA_DIR ? resolve(process.env.SHOP_DATA_DIR) : join(APP_ROOT, 'data');
+
 const app = createApp({
   version,
-  storeFile: join(APP_ROOT, 'data', `orders.${version}.json`),
+  storeFile: join(dataDir, `orders.${version}.json`),
   testMode,
   distDir,
 });

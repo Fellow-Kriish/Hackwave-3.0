@@ -1,0 +1,35 @@
+{
+  "id": "checkout-missing-product",
+  "goal": "As a shopper, buy the Moon Boot shoes with a valid credit card and reach order confirmation.",
+  "inputs": {
+    "product": "Moon Boot",
+    "card": {
+      "number": "4242 4242 4242 4242",
+      "expiry": "12/29",
+      "cvv": "123",
+      "name": "Kartik Test"
+    },
+    "shipping": {
+      "name": "Kartik Test",
+      "street": "12 MG Road",
+      "city": "Indore",
+      "pincode": "452001",
+      "phone": "9876543210"
+    }
+  },
+  "oracle": {
+    "state": {
+      "store": "orders",
+      "expectedNewCount": 1,
+      "match": {
+        "items": ["Moon Boot"],
+        "cardLast4": "4242"
+      },
+      "pollMs": 5000
+    },
+    "ui": {
+      "newRecordIdVisible": true,
+      "noAlerts": true
+    }
+  }
+}
