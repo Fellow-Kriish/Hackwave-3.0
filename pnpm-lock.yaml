@@ -67,14 +67,36 @@ importers:
         specifier: ^8.3.4
         version: 8.3.4(@types/node@24.19.2)(esbuild@0.28.2)(tsx@4.23.15)
 
+  packages/contracts:
+    dependencies:
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
+
   packages/engine:
     dependencies:
+      '@hackwave/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@hackwave/verifier':
+        specifier: workspace:*
+        version: link:../verifier
       playwright:
         specifier: 1.63.0
         version: 1.63.0
       zod:
         specifier: ^4.6.5
         version: 4.6.5
+
+  packages/verifier:
+    dependencies:
+      '@hackwave/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+    devDependencies:
+      playwright:
+        specifier: 1.63.0
+        version: 1.63.0
 
 packages:
 

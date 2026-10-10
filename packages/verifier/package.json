@@ -1,0 +1,14 @@
+{
+  "name": "@hackwave/verifier",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hackwave/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

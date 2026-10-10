@@ -1,24 +1,18 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { BudgetsSchema } from '@hackwave/contracts';
 import { z } from 'zod';
 import { findRepoRoot } from './paths';
 
 const positiveInt = z.number().int().positive();
-const nonNegativeInt = z.number().int().nonnegative();
 const ratio = z.number().min(0).max(1);
 const port = z.number().int().min(1).max(65535);
 const tier = z.enum(['strong', 'fast']);
 
 /** engine.config.json: every budget, threshold and knob lives here. Unknown keys are rejected to catch typos. */
 export const EngineConfigSchema = z.strictObject({
-  budgets: z.strictObject({
-    stepMs: positiveInt,
-    runMs: positiveInt,
-    maxActions: positiveInt,
-    maxReplansPerMilestone: nonNegativeInt,
-    maxLlmCallsPerRun: nonNegativeInt,
-    maxRung3AttemptsPerStepPerScreen: nonNegativeInt,
-  }),
+  /** Shared with intents, which may override any budget. */
+  budgets: BudgetsSchema,
   ladder: z.strictObject({
     similarityAccept: ratio,
     similarityMargin: ratio,

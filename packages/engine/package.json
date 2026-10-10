@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@hackwave/contracts": "workspace:*",
+    "@hackwave/verifier": "workspace:*",
     "playwright": "1.63.0",
     "zod": "^4.6.5"
   }

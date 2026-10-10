@@ -1,0 +1,36 @@
+{
+  "id": "checkout-valid-card",
+  "goal": "As a shopper, buy the Trail Runner shoes with a valid credit card and reach order confirmation.",
+  "inputs": {
+    "product": "Trail Runner",
+    "card": {
+      "number": "4242 4242 4242 4242",
+      "expiry": "12/29",
+      "cvv": "123",
+      "name": "Kartik Test"
+    },
+    "shipping": {
+      "name": "Kartik Test",
+      "street": "12 MG Road",
+      "city": "Indore",
+      "pincode": "452001",
+      "phone": "9876543210"
+    }
+  },
+  "oracle": {
+    "state": {
+      "store": "orders",
+      "expectedNewCount": 1,
+      "match": {
+        "items": ["Trail Runner"],
+        "total": 1299,
+        "cardLast4": "4242"
+      },
+      "pollMs": 5000
+    },
+    "ui": {
+      "newRecordIdVisible": true,
+      "noAlerts": true
+    }
+  }
+}
