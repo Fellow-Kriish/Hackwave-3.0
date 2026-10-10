@@ -1,0 +1,33 @@
+{
+  "name": "hackwave",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "bootstrap": "pnpm install && pnpm --filter @hackwave/engine exec playwright install chromium",
+    "shop": "pnpm --filter @hackwave/shop start",
+    "engine": "tsx packages/engine/src/cli.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc -p apps/shop/tsconfig.json && tsc -p apps/shop/tsconfig.node.json && tsc -p packages/engine/tsconfig.json",
+    "test": "vitest run",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.2",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^4.1.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
