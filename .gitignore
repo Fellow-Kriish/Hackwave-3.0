@@ -1,0 +1,23 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Secrets: only the placeholder file is committed
+.env
+.env.*
+!.env.example
+
+# Shop runtime stores (recreated on first order or reset)
+apps/shop/data/*.json
+
+# Run folders stay local; the caches the engine learns from are committed
+runs/*
+!runs/plans/
+!runs/locators/
+!runs/llm-cache/
+!runs/snapshots/
+
+test-results/
+playwright-report/
+.DS_Store
+Thumbs.db

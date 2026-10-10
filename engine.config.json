@@ -1,0 +1,47 @@
+{
+  "budgets": {
+    "stepMs": 10000,
+    "runMs": 90000,
+    "maxActions": 25,
+    "maxReplansPerMilestone": 2,
+    "maxLlmCallsPerRun": 8,
+    "maxRung3AttemptsPerStepPerScreen": 1
+  },
+  "ladder": {
+    "similarityAccept": 0.85,
+    "similarityMargin": 0.15,
+    "candidatesPerStep": 8,
+    "fullTreeBelowScore": 0.5,
+    "visionEnabled": false
+  },
+  "tree": {
+    "maxNodes": 400,
+    "maxTextChars": 80
+  },
+  "settle": {
+    "sampleGapMs": 150,
+    "maxWaitMs": 3000
+  },
+  "verifier": {
+    "pollMs": 5000
+  },
+  "models": {
+    "planner": "strong",
+    "replanner": "strong",
+    "resolver": "fast",
+    "explain": "fast"
+  },
+  "llm": {
+    "mode": "replay",
+    "provider": "anthropic",
+    "providerFast": null,
+    "baseUrl": null
+  },
+  "shop": {
+    "ports": {
+      "v1": 5171,
+      "v2": 5172,
+      "v2-broken": 5173
+    }
+  }
+}
