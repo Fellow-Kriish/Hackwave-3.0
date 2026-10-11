@@ -3,51 +3,38 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { basename, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import type { Intent } from '@hackwave/contracts';
 import { describeEvent } from '../console';
+import type { EngineEvent } from '../events';
+import { exploreIntent, outcomeLine } from '../explore';
 import { lintIntentText } from '../intent-lint';
 import { locatorCacheFile } from '../locator-cache';
 import { findRepoRoot } from '../paths';
 import { planCacheFile } from '../plan-cache';
 import { healerLine } from '../report';
-import { runIntent, SetupError } from '../run';
+import { exploreGoal, runIntent, SetupError } from '../run';
 import { freePort, resetStore, startPrivateShop, type PrivateShop } from '../shop-process';
 import { fetchCatalog, typedIntent } from '../typed-goal';
 import { renderPage } from './page';
 
 export type Version = 'v1' | 'v2' | 'v2-broken' | 'v2-wrong-total';
 
-export const VERSIONS: Record<Version, string> = {
-  v1: 'Version A (the original)',
-  v2: 'Version B (the redesign)',
-  'v2-broken': 'Version B with a backend bug (confirms orders, saves nothing)',
-  'v2-wrong-total': 'Version B with a pricing bug (saves the wrong total)',
+/** The demo shop's versions as the page shows them: a short code, a name, and what is different about it. */
+export const VERSION_INFO: Record<Version, { code: string; name: string; detail: string }> = {
+  v1: { code: 'A', name: 'The original', detail: 'Cart, checkout, shipping, payment, place order' },
+  v2: { code: 'B', name: 'The redesign', detail: 'Buttons renamed, a phone field added, payment on its own screen' },
+  'v2-broken': { code: 'B1', name: 'Redesign with a backend bug', detail: 'Says the order is confirmed, saves nothing' },
+  'v2-wrong-total': { code: 'B2', name: 'Redesign with a pricing bug', detail: 'Saves the order at the wrong total' },
 };
 
-/** The guided demo: one sentence, four steps, one address. */
+export const VERSIONS: Record<Version, string> = Object.fromEntries(
+  Object.entries(VERSION_INFO).map(([version, info]) => [version, `Version ${info.code}: ${info.name.toLowerCase()}`]),
+) as Record<Version, string>;
+
+/** The guided demo preset: one sentence, four runs, one address. */
 export const GUIDED_STEPS: readonly { version: Version; fresh: boolean; title: string; say: string }[] = [
-  {
-    version: 'v1',
-    fresh: true,
-    title: 'Version A: the AI reads the site and plans the test from your sentence',
-    say: 'I only typed the goal. It reads the page, plans the clicks and checks the real order store.',
-  },
-  {
-    version: 'v2',
-    fresh: false,
-    title: 'Version B deployed to the same address: the same sentence, nothing rewritten',
-    say: 'Renamed buttons, a new flow, a new required field. It notices, rebuilds its steps from the goal, passes, and says what changed.',
-  },
-  {
-    version: 'v2-broken',
-    fresh: false,
-    title: 'Version B with a backend bug: the page will say the order is confirmed',
-    say: 'Same UI, but nothing is saved. The page lies; the store does not. It stays red.',
-  },
-  {
-    version: 'v2',
-    fresh: false,
-    title: 'Version B again: it learned',
-    say: 'Healing is a one-time cost: this run needs no AI at all.',
-  },
+  { version: 'v1', fresh: true, title: 'Version A, planned from the sentence', say: 'Only the goal was typed. It reads the page, plans the clicks and checks the real order store.' },
+  { version: 'v2', fresh: false, title: 'Version B at the same address', say: 'Renamed buttons, a new flow, a new required field. It heals, passes, and says what changed.' },
+  { version: 'v2-broken', fresh: false, title: 'Version B with the backend bug', say: 'The page says confirmed; the store has nothing. It stays red.' },
+  { version: 'v2', fresh: false, title: 'Version B again', say: 'Healing is a one-time cost: this run needs no AI at all.' },
 ];
 
 const MAX_BODY_BYTES = 10_000;
@@ -105,18 +92,63 @@ export interface UiServer {
   close(): Promise<void>;
 }
 
-interface RunRequest {
-  goal: string;
-  version: Version;
-  /** Use the live model even for a goal that has recorded answers. */
-  live: boolean;
-  /** Forget what was learned for this goal first: the AI plans from scratch. */
+/** One planned run of a batch: a shop version, or the website. */
+interface PlannedRun {
+  version: Version | null;
+  code: string;
+  name: string;
   fresh: boolean;
 }
 
+/** A test as the tester started it: one goal on one or more versions of the shop, or on one website. */
+export type BatchRequest =
+  | { project: 'shop'; goal: string; runs: PlannedRun[]; live: boolean; guided: boolean }
+  | { project: 'website'; goal: string; url: string; query: string | null; runs: PlannedRun[]; live: true; guided: false };
+
+/** Parses a POST body into a batch, or says what is wrong with it. `version` (one) is still accepted. */
+export function parseBatch(body: Record<string, unknown>, guided: boolean): BatchRequest | string {
+  const goal = typeof body.goal === 'string' ? collapse(body.goal) : '';
+  if (goal.length < 10 || goal.length > 300) return 'write the goal as one sentence (10 to 300 characters)';
+  if (body.project === 'website') {
+    let url: URL;
+    try {
+      url = new URL(typeof body.url === 'string' ? body.url.trim() : '');
+    } catch {
+      return 'give the website address, e.g. https://www.example.com';
+    }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'the website address must start with http:// or https://';
+    const query = typeof body.query === 'string' && collapse(body.query) ? collapse(body.query).slice(0, 120) : null;
+    return { project: 'website', goal, url: url.toString(), query, live: true, guided: false, runs: [{ version: null, code: 'W', name: url.host, fresh: body.fresh === true }] };
+  }
+  const fresh = body.fresh === true;
+  if (guided) {
+    return { project: 'shop', goal, live: body.live === true, guided: true, runs: GUIDED_STEPS.map((step) => ({ version: step.version, code: VERSION_INFO[step.version].code, name: step.title, fresh: step.fresh })) };
+  }
+  const asked = Array.isArray(body.versions) ? body.versions : [typeof body.version === 'string' ? body.version : 'v1'];
+  if (asked.length === 0) return 'pick at least one version';
+  if (asked.length > 8) return 'pick at most eight runs';
+  const runs: PlannedRun[] = [];
+  for (const [index, value] of asked.entries()) {
+    if (typeof value !== 'string' || !(value in VERSION_INFO)) return `unknown version "${String(value)}"`;
+    const version = value as Version;
+    runs.push({ version, code: VERSION_INFO[version].code, name: VERSION_INFO[version].name, fresh: fresh && index === 0 });
+  }
+  return { project: 'shop', goal, live: body.live === true, guided: false, runs };
+}
+
+/** One step as the run resolved it: which rung found its control (1 saved spot, 2 name match, 3 fast AI, 5 re-plan). */
+interface StepTrace {
+  milestone: string;
+  stepKey: string;
+  rung: number;
+  action: string;
+  target: string;
+  planned: string | null;
+}
+
 /**
- * The web app: a page where a tester types a goal, picks the version of the app, and watches the engine plan, act,
- * heal and verify, live. It runs the same engine as the CLI against its own shop at one address.
+ * The web app: pick a project and versions, type a goal, and watch the engine plan, act, heal and verify, then compare
+ * the versions. It runs the same engine as the CLI, against its own shop at one address (or a website, unverified).
  */
 export async function startUiServer(options: UiOptions): Promise<UiServer> {
   const root = findRepoRoot();
@@ -129,39 +161,42 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
   const defaultGoal = checkout?.goal ?? 'Complete checkout with a valid credit card';
   const examples = ['Complete checkout with a valid credit card', 'Buy the City Sneaker and pay by credit card'];
   const clients = new Set<ServerResponse>();
-  const history: Record<string, unknown>[] = [];
+  const batches: Record<string, unknown>[] = [];
   let shop: PrivateShop | null = null;
   let deployed: Version | null = null;
   let busy = false;
+  let batchCount = 0;
 
   const send = (message: Record<string, unknown>) => {
     const data = `data: ${JSON.stringify(message)}\n\n`;
     for (const client of clients) client.write(data);
   };
+  const liveAvailable = () => Boolean(process.env.LLM_API_KEY) && process.env.LLM_API_KEY !== 'replace-me';
   const state = () => ({
     type: 'state',
     address,
     deployed,
-    deployedLabel: deployed ? VERSIONS[deployed] : null,
+    deployedCode: deployed ? VERSION_INFO[deployed].code : null,
     busy,
     defaultGoal,
     examples,
-    versions: VERSIONS,
-    steps: GUIDED_STEPS,
-    liveAvailable: Boolean(process.env.LLM_API_KEY) && process.env.LLM_API_KEY !== 'replace-me',
-    history,
+    versions: VERSION_INFO,
+    guided: GUIDED_STEPS.map((step) => ({ version: step.version, code: VERSION_INFO[step.version].code, title: step.title, say: step.say })),
+    liveAvailable: liveAvailable(),
+    batches,
   });
   const setBusy = (value: boolean) => {
     busy = value;
     send({ type: 'busy', busy });
   };
+  const runUrl = (runDir: string, file: string) => `/runs/${encodeURIComponent(basename(runDir))}/${file.split('/').map(encodeURIComponent).join('/')}`;
 
   async function deploy(version: Version): Promise<string> {
     if (deployed !== version || !shop) {
       if (shop) await shop.stop();
       shop = null;
       deployed = null;
-      send({ type: 'line', tone: 'warn', text: `▶ deploying ${VERSIONS[version]} to ${address} ...` });
+      send({ type: 'line', tone: 'warn', text: `▶ deploying Version ${VERSION_INFO[version].code} (${VERSION_INFO[version].name.toLowerCase()}) to ${address} ...` });
       shop = await startPrivateShop(root, version, shopPort);
       deployed = version;
       send({ ...state(), type: 'state' });
@@ -169,43 +204,60 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
     return shop.origin;
   }
 
-  async function runOne(request: RunRequest, label: string): Promise<boolean> {
-    const origin = await deploy(request.version);
+  /** Streams each event's log lines and keeps the per-step trace the comparison table is built from. */
+  const tracer = () => {
+    const steps: StepTrace[] = [];
+    const skipped: string[] = [];
+    const onEvent = (event: EngineEvent) => {
+      for (const line of describeEvent(event)) send({ type: 'line', ...line });
+      const e = event as EngineEvent & Record<string, unknown>;
+      if (e.type === 'resolved' && typeof e.stepKey === 'string') {
+        steps.push({
+          milestone: e.stepKey.split('.')[0] ?? e.stepKey,
+          stepKey: e.stepKey,
+          rung: Number(e.rung),
+          action: String(e.action),
+          target: String(e.target),
+          planned: Number(e.rung) > 1 ? String(e.planned) : null,
+        });
+      }
+      if (e.type === 'milestone_skipped' && typeof e.milestoneKey === 'string') skipped.push(e.milestoneKey);
+      if (e.type === 'milestone_started' && typeof e.milestoneKey === 'string') send({ type: 'milestone', key: e.milestoneKey });
+    };
+    return { steps, skipped, onEvent };
+  };
+
+  async function runShop(batchId: string, index: number, request: Extract<BatchRequest, { project: 'shop' }>, planned: PlannedRun): Promise<Record<string, unknown>> {
+    const version = planned.version as Version;
+    const origin = await deploy(version);
     await resetStore(origin);
     const known = knownIntentFor(root, request.goal);
     // A goal we have recorded answers for replays them (offline); a new sentence is planned by the live model.
-    const goal = known?.goal ?? collapse(request.goal);
+    const goal = known?.goal ?? request.goal;
     const base = known ?? checkout;
     if (!base) throw new SetupError('intents/checkout.json is missing: it supplies the test data (card, address, phone)');
     const { intent, notes } = typedIntent(goal, base.inputs, await fetchCatalog(origin));
     const file = join(runsDir, 'typed', `${intent.id}.json`);
     mkdirSync(join(runsDir, 'typed'), { recursive: true });
     writeFileSync(file, `${JSON.stringify(intent, null, 2)}\n`);
-    if (request.fresh) for (const cache of [planCacheFile(root, intent.id), locatorCacheFile(root, intent.id)]) rmSync(cache, { force: true });
+    if (planned.fresh) for (const cache of [planCacheFile(root, intent.id), locatorCacheFile(root, intent.id)]) rmSync(cache, { force: true });
     const mode = request.live || !known ? 'live' : 'replay';
-    send({ type: 'run', label, goal, version: request.version, versionLabel: VERSIONS[request.version], address, mode, fresh: request.fresh, notes });
-    const result = await runIntent({
-      intentFile: file,
-      target: origin,
-      headed: options.headed,
-      slowMo: options.slowMo,
-      quiet: true,
-      envOverride: { LLM_MODE: mode },
-      onEvent: (event) => {
-        for (const line of describeEvent(event)) send({ type: 'line', ...line });
-      },
-    });
+    send({ type: 'run', batchId, index, code: planned.code, name: planned.name, goal, target: address, mode, fresh: planned.fresh, notes });
+    const trace = tracer();
+    const result = await runIntent({ intentFile: file, target: origin, headed: options.headed, slowMo: options.slowMo, quiet: true, envOverride: { LLM_MODE: mode }, onEvent: trace.onEvent });
     const { verdict } = result;
-    const entry = {
-      label,
-      goal,
-      version: request.version,
-      versionLabel: VERSIONS[request.version],
+    const finalShot = join(result.runDir, 'evidence', 'final.png');
+    return {
+      index,
+      code: planned.code,
+      name: planned.name,
+      version,
       color: verdict.color,
       kind: verdict.kind,
       summary: result.summary,
       whatChanged: result.whatChanged,
       healer: healerLine(verdict),
+      claimed: verdict.oracle.finalHeading,
       checks: (['state', 'binding', 'alerts'] as const).map((name) => ({ name, status: verdict.oracle[name].status, summary: verdict.oracle[name].summary })),
       heals: verdict.heals.length,
       replans: verdict.replans.length,
@@ -214,11 +266,86 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
       mode,
       seconds: Math.round(verdict.timings.totalMs / 100) / 10,
       hypothesis: result.explanation && 'hypothesis' in result.explanation ? result.explanation.hypothesis : null,
-      reportUrl: `/runs/${encodeURIComponent(basename(result.runDir))}/report.html`,
+      steps: trace.steps,
+      skipped: trace.skipped,
+      shots: result.shots.map((shot) => ({ url: runUrl(result.runDir, shot.file), caption: shot.caption, kind: shot.kind, stepKey: shot.stepKey })),
+      finalShot: existsSync(finalShot) ? runUrl(result.runDir, 'evidence/final.png') : null,
+      reportUrl: runUrl(result.runDir, 'report.html'),
+      at: new Date().toISOString(),
     };
-    history.unshift(entry);
-    send({ type: 'result', ...entry });
-    return true;
+  }
+
+  async function runWebsite(batchId: string, request: Extract<BatchRequest, { project: 'website' }>): Promise<Record<string, unknown>> {
+    if (!liveAvailable()) throw new SetupError('a website is explored by the live model: put LLM_API_KEY (and the models) in .env');
+    const intent = exploreIntent(request.goal, request.query ? { query: request.query } : {});
+    if (request.runs[0]?.fresh) for (const cache of [planCacheFile(root, intent.id), locatorCacheFile(root, intent.id)]) rmSync(cache, { force: true });
+    send({ type: 'run', batchId, index: 0, code: 'W', name: new URL(request.url).host, goal: request.goal, target: request.url, mode: 'live', fresh: request.runs[0]?.fresh ?? false, notes: [] });
+    const trace = tracer();
+    const result = await exploreGoal({ intent, target: request.url, headed: options.headed, slowMo: options.slowMo, quiet: true, envOverride: { LLM_MODE: 'live' }, onEvent: trace.onEvent });
+    return {
+      index: 0,
+      code: 'W',
+      name: new URL(request.url).host,
+      version: null,
+      color: 'UNVERIFIED',
+      kind: 'explore',
+      summary: `Unverified: ${outcomeLine(result)}. Nothing checked the outcome against the site's data.`,
+      whatChanged: [],
+      healer: outcomeLine(result),
+      claimed: result.finalHeading ?? result.finalTitle,
+      checks: [{ name: 'state', status: 'skipped', summary: 'explore mode has no source of truth to read' }],
+      heals: result.shots.filter((shot) => shot.kind === 'healed').length,
+      replans: result.shots.filter((shot) => shot.kind === 'replanned').length,
+      llmCalls: result.llmCalls,
+      llmCached: 0,
+      mode: 'live',
+      seconds: null,
+      hypothesis: null,
+      steps: trace.steps,
+      skipped: trace.skipped,
+      shots: result.shots.map((shot) => ({ url: runUrl(result.runDir, shot.file), caption: shot.caption, kind: shot.kind, stepKey: shot.stepKey })),
+      finalShot: result.screenshot ? runUrl(result.runDir, result.screenshot) : null,
+      reportUrl: runUrl(result.runDir, 'report.html'),
+      at: new Date().toISOString(),
+    };
+  }
+
+  async function runBatch(request: BatchRequest): Promise<void> {
+    batchCount += 1;
+    const id = `b${batchCount}`;
+    const batch: Record<string, unknown> & { runs: Record<string, unknown>[] } = {
+      id,
+      goal: request.goal,
+      project: request.project,
+      target: request.project === 'website' ? request.url : address,
+      guided: request.guided,
+      plan: request.runs.map((run) => ({ code: run.code, name: run.name, version: run.version })),
+      runs: [],
+      done: false,
+      error: null,
+      startedAt: new Date().toISOString(),
+    };
+    batches.unshift(batch);
+    send({ type: 'batch', batch });
+    try {
+      if (request.project === 'website') {
+        const entry = await runWebsite(id, request);
+        batch.runs.push(entry);
+        send({ type: 'result', batchId: id, entry });
+      } else {
+        for (const [index, planned] of request.runs.entries()) {
+          const entry = await runShop(id, index, request, planned);
+          batch.runs.push(entry);
+          send({ type: 'result', batchId: id, entry });
+        }
+      }
+    } catch (error) {
+      batch.error = error instanceof Error ? error.message : String(error);
+      throw error;
+    } finally {
+      batch.done = true;
+      send({ type: 'batch_done', batchId: id, error: batch.error });
+    }
   }
 
   async function guard(work: () => Promise<void>): Promise<void> {
@@ -227,8 +354,8 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
       await work();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const hint = /needs a model|not configured|LLM_API_KEY/i.test(message)
-        ? 'A new sentence is planned by the live AI: put LLM_API_KEY (and the models) in .env, or use the recorded goal, which runs offline.'
+      const hint = /needs a model|not configured|LLM_API_KEY|live model/i.test(message)
+        ? 'A new sentence or a website is planned by the live model: put LLM_API_KEY (and the models) in .env, or use the recorded goal on the demo shop, which runs offline.'
         : null;
       send({ type: 'error', message, hint });
     } finally {
@@ -256,14 +383,6 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
       });
       request.on('error', reject);
     });
-
-  const parseRun = (body: Record<string, unknown>): RunRequest | string => {
-    const goal = typeof body.goal === 'string' ? collapse(body.goal) : '';
-    if (goal.length < 10 || goal.length > 300) return 'write the goal as one sentence (10 to 300 characters)';
-    const version = (typeof body.version === 'string' ? body.version : 'v1') as Version;
-    if (!(version in VERSIONS)) return `unknown version "${version}"`;
-    return { goal, version, live: body.live === true, fresh: body.fresh === true };
-  };
 
   const json = (response: ServerResponse, status: number, body: unknown) => {
     response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -307,22 +426,10 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
         } catch (error) {
           return json(response, 400, { error: error instanceof Error ? error.message : String(error) });
         }
-        const parsed = parseRun(body);
+        const parsed = parseBatch(body, url.pathname === '/api/demo' || body.guided === true);
         if (typeof parsed === 'string') return json(response, 400, { error: parsed });
         json(response, 202, { started: true });
-        if (url.pathname === '/api/run') {
-          void guard(async () => {
-            await runOne(parsed, VERSIONS[parsed.version]);
-          });
-        } else {
-          void guard(async () => {
-            for (const [index, step] of GUIDED_STEPS.entries()) {
-              send({ type: 'step', index, title: step.title, say: step.say });
-              await runOne({ ...parsed, version: step.version, fresh: step.fresh }, `Step ${index + 1} · ${VERSIONS[step.version]}`);
-            }
-            send({ type: 'step', index: GUIDED_STEPS.length, title: 'Done', say: '' });
-          });
-        }
+        void guard(() => runBatch(parsed));
         return;
       }
       if (request.method === 'GET' && url.pathname.startsWith('/runs/')) {

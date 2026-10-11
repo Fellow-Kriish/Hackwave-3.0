@@ -51,6 +51,7 @@ echo     6  Open the reports of the last demo in the browser
 echo.
 echo    YOUR OWN TEST  (needs internet and the key in .env: a new sentence is planned by the AI)
 echo     T  Type a goal in plain words and test it, e.g. "Complete checkout with a valid credit card"
+echo     E  Explore ANY website (e.g. amazon.in): it plans and clicks, but checks nothing, so UNVERIFIED
 echo.
 echo    SHOW MORE
 echo     7  Readable errors: lint a deliberately broken test file
@@ -74,6 +75,7 @@ if /i "%choice%"=="5" goto demovideo
 if /i "%choice%"=="F" goto demosameurl
 if /i "%choice%"=="U" goto webapp
 if /i "%choice%"=="T" goto typegoal
+if /i "%choice%"=="E" goto explore
 if /i "%choice%"=="6" goto reports
 if /i "%choice%"=="7" goto lint
 if /i "%choice%"=="8" goto evalacts
@@ -140,6 +142,26 @@ start "HackWave web app" cmd /k pnpm -s ui
 echo.
 echo   The web app is starting in a new window and will open in your browser at http://localhost:4321
 echo   Close that window to stop it.
+goto pause
+
+:explore
+echo.
+echo   Explore mode works on any website. It plans the steps, clicks and heals as usual,
+echo   but nothing checks the result against the site's data, so it reports UNVERIFIED, never a pass.
+echo.
+set "site="
+set /p "site=   Website [https://www.amazon.in/]: "
+if not defined site set "site=https://www.amazon.in/"
+set "goal="
+set /p "goal=   Goal [search for the query and add the first result to the cart]: "
+if not defined goal set "goal=search for the query and add the first result to the cart"
+set "goal=%goal:"=%"
+set "words="
+set /p "words=   Words it may type, as query [water bottle]: "
+if not defined words set "words=water bottle"
+set "words=%words:"=%"
+echo.
+call pnpm -s engine explore "%goal%" --target %site% --input "query=%words%"
 goto pause
 
 :typegoal

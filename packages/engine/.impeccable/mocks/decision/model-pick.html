@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>HackWave · Signal Box</title>
+<style>
+:root{--steel:#3E4A44;--steel2:#47544D;--well:#1B1F1D;--enamel:#E9ECE6;--g:#2FA84F;--a:#E3A21A;--r:#D63A2F;--dim:#5C6660;--text:#E9ECE6;--muted:#AEB8B1}
+*{box-sizing:border-box;margin:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--steel);color:var(--text);font:15px/1.45 "Segoe UI",system-ui,sans-serif}
+nav{height:60px;display:flex;align-items:center;gap:36px;padding:0 28px;background:#333E39;border-bottom:2px solid #262E2A}
+.plate{background:var(--enamel);color:#1B1F1D;font-weight:800;padding:5px 14px;border-radius:3px;font-size:18px;box-shadow:inset 0 0 0 2px #1B1F1D}
+nav a{color:var(--muted);font-weight:600;text-decoration:none;padding:6px 2px;border-bottom:3px solid transparent}
+nav a.on{color:#fff;border-bottom-color:var(--a)}
+nav .r{margin-left:auto;color:var(--muted);font-size:13px}
+.line{margin:22px 28px 0;background:var(--well);border-radius:6px;padding:22px 28px;box-shadow:inset 0 2px 8px #000a;height:170px;position:relative}
+.line h2{font-size:13px;color:var(--muted);font-weight:600;margin-bottom:26px}
+.track{display:flex;align-items:center}
+.sec{flex:1;height:10px;background:#39423D;margin-right:6px;border-radius:2px;position:relative}
+.sec.on{background:var(--g)}.sec.now{background:var(--a)}
+.sec span{position:absolute;top:22px;left:0;font-size:13px;color:var(--muted);white-space:nowrap}
+.sec.on span,.sec.now span{color:#fff}
+.lamp{width:44px;height:44px;border-radius:50%;background:#2A302D;border:3px solid #111;margin-left:14px;box-shadow:inset 0 0 0 4px #1B1F1D}
+.lampt{position:absolute;right:20px;top:120px;font-size:12px;color:var(--muted);text-align:right}
+main{display:grid;grid-template-columns:1fr 1fr;gap:22px;padding:22px 28px}
+.panel{background:var(--steel2);border:1px solid #2C3530;border-radius:4px;padding:20px 22px}
+h3{font-size:13px;color:var(--muted);font-weight:600;margin-bottom:10px}
+h3 em{display:block;font-style:normal;color:#fff;font-size:19px;font-weight:700}
+.opt{display:grid;grid-template-columns:22px 70px 1fr;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #56635B}
+.opt:last-child{border-bottom:0}
+.dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--enamel)}
+.opt.on .dot{background:var(--a);border-color:var(--a)}
+.code{background:var(--enamel);color:#1B1F1D;font-weight:800;text-align:center;border-radius:3px;padding:2px 0}
+.opt small{display:block;color:var(--muted);font-size:13px}
+textarea{width:100%;height:120px;background:var(--well);color:#fff;border:1px solid #111;border-radius:4px;padding:12px;font:17px/1.4 inherit;resize:none}
+.go{display:flex;align-items:center;gap:14px;margin-top:16px}
+.go button{background:var(--a);color:#1B1F1D;border:0;border-radius:4px;padding:13px 26px;font:800 17px inherit}
+.go small{color:var(--muted)}
+.proj{display:flex;gap:10px;margin-bottom:16px}
+.proj span{padding:8px 12px;border:1px solid #66736B;border-radius:3px;font-size:14px}
+.proj span.on{background:var(--enamel);color:#1B1F1D;font-weight:700}
+</style></head><body>
+<nav><span class="plate">HackWave</span><a class="on">New test</a><a>Live run</a><a>Reports</a><span class="r">Shop at localhost:64012, model from recordings</span></nav>
+<div class="line"><h2>The line for this goal: sections light as the run passes; the lamp at the end is lit by the verifier alone</h2>
+<div class="track"><div class="sec on"><span>Cart</span></div><div class="sec on"><span>Checkout</span></div><div class="sec on"><span>Shipping</span></div><div class="sec now"><span>Payment</span></div><div class="sec"><span>Place order</span></div><div class="lamp"></div></div>
+<p class="lampt">Verdict lamp: dark until the store is checked</p></div>
+<main>
+<div class="panel"><h3>Route<em>Project and versions</em></h3>
+<div class="proj"><span class="on">HackWave demo shop</span><span>Any website (unverified)</span><span>Upload: coming later</span></div>
+<div class="opt on"><span class="dot"></span><span class="code">A</span><span>The original<small>Cart, checkout, shipping, payment</small></span></div>
+<div class="opt on"><span class="dot"></span><span class="code">B</span><span>The redesign<small>Renamed buttons, new phone field</small></span></div>
+<div class="opt on"><span class="dot"></span><span class="code">B1</span><span>Backend bug<small>Confirms orders, saves nothing</small></span></div>
+<div class="opt"><span class="dot"></span><span class="code">B2</span><span>Pricing bug<small>Saves the wrong total</small></span></div></div>
+<div class="panel"><h3>Destination<em>Goal, in plain words</em></h3>
+<textarea>As a shopper, buy the Trail Runner shoes with a valid credit card and reach order confirmation.</textarea>
+<div class="go"><button>Run test on 3 versions</button><small>Recorded goal, runs offline</small></div></div>
+</main></body></html>

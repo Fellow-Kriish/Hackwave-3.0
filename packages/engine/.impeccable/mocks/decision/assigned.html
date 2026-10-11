@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>HackWave · Registered Post</title>
+<style>
+:root{--ink:#1F2B4D;--label:#F5F6F8;--ad:#F4C7C3;--stamp:#6B3FA0;--red:#C8102E;--rule:#C9CED8;--text:#1A2033;--muted:#5A6275;--green:#1E7B45;--amber:#B86E00}
+*{box-sizing:border-box;margin:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--label);color:var(--text);font:15px/1.45 "Segoe UI",system-ui,sans-serif}
+nav{height:64px;background:var(--ink);color:#fff;display:flex;align-items:center;padding:0 32px;gap:40px}
+.mark{font-weight:800;font-size:22px;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+.mark i{width:26px;height:26px;border:2.5px solid var(--ad);border-radius:50%;display:inline-block;position:relative}
+.mark i:after{content:"";position:absolute;inset:6px;border-top:2.5px solid var(--ad);border-bottom:2.5px solid var(--ad)}
+.tabs{display:flex;height:100%}
+.tabs a{display:flex;align-items:center;padding:0 22px;color:#C7CEE0;font-weight:600;text-decoration:none;border-bottom:4px solid transparent}
+.tabs a.on{color:#fff;border-bottom-color:var(--ad)}
+.addr{margin-left:auto;display:flex;gap:28px;color:#C7CEE0;font-size:13px}
+.addr b{color:#fff;font-weight:600;display:block;font-size:14px}
+main{display:grid;grid-template-columns:1fr 560px;height:836px;border-top:1px solid #0d1530}
+.col{border-right:1px solid var(--rule);display:grid;grid-template-rows:auto 1fr}
+section{border-bottom:1px solid var(--rule);padding:22px 32px}
+h2{font-size:13px;font-weight:700;color:var(--muted);margin-bottom:12px}
+h2 em{font-style:normal;color:var(--ink);font-size:18px;display:block;font-weight:800;margin-top:2px}
+.proj{display:grid;grid-template-columns:1fr 1fr 1fr;border:1px solid var(--rule)}
+.proj div{padding:14px 16px;border-right:1px solid var(--rule);background:#fff}
+.proj div:last-child{border-right:0;background:#ECEEF2;color:#8A91A2}
+.proj div.on{outline:2px solid var(--ink);outline-offset:-2px}
+.proj b{display:block;font-size:15px}
+.proj small{color:var(--muted);font-size:13px}
+.tag{display:inline-block;font-size:11px;font-weight:700;padding:1px 6px;border:1.5px solid currentColor;border-radius:3px;margin-left:6px;vertical-align:1px}
+.vers{display:grid;grid-template-columns:repeat(2,1fr);border-top:1px solid var(--rule);border-left:1px solid var(--rule)}
+.v{display:grid;grid-template-columns:56px 1fr 28px;align-items:center;background:#fff;border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);min-height:96px;position:relative}
+.v:before{content:"";position:absolute;left:56px;top:0;bottom:0;border-left:2px dashed var(--rule)}
+.v .code{font-size:30px;font-weight:800;color:var(--ink);text-align:center}
+.v .d{padding:12px 16px}
+.v .d b{display:block}
+.v .d small{color:var(--muted);font-size:13px}
+.box{width:20px;height:20px;border:2px solid var(--ink);border-radius:3px}
+.v.on .box{background:var(--ink);box-shadow:inset 0 0 0 3px #fff}
+.v.on{background:#F9FAFC}
+.right{display:grid;grid-template-rows:auto auto 1fr}
+textarea{width:100%;height:110px;border:1.5px solid var(--ink);border-radius:2px;padding:12px 14px;font:17px/1.4 inherit;color:var(--text);background:#fff;resize:none}
+.chips{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.chips span{font-size:13px;border:1px solid var(--rule);background:#fff;padding:3px 10px;border-radius:2px}
+.run{display:flex;align-items:center;gap:16px;margin-top:16px}
+.run button{background:var(--ink);color:#fff;border:0;font:700 17px inherit;padding:14px 30px;border-radius:2px}
+.run small{color:var(--muted);font-size:13px}
+.ad{margin:22px 32px;background:var(--ad);border:1px solid #D99A95;position:relative;padding:20px 22px 22px}
+.ad:before,.ad:after{content:"";position:absolute;left:0;right:0;height:8px;background:radial-gradient(circle at 6px 4px,var(--label) 3px,transparent 3.5px) 0 0/12px 8px repeat-x}
+.ad:before{top:-4px}.ad:after{bottom:-4px}
+.ad h3{font-size:12px;font-weight:800;color:#7A2E2A;margin-bottom:12px}
+.line{display:grid;grid-template-columns:150px 1fr;gap:10px;padding:8px 0;border-bottom:1.5px dotted #A9625D;font-size:14px}
+.line span{color:#7A2E2A}
+.pm{position:absolute;right:26px;bottom:26px;width:118px;height:118px;border:3px solid var(--red);border-radius:50%;color:var(--red);display:grid;place-items:center;text-align:center;transform:rotate(-12deg);font-weight:800;opacity:.92}
+.pm:before{content:"";position:absolute;inset:8px;border:1.5px solid var(--red);border-radius:50%}
+.pm b{font-size:26px;display:block;line-height:1}
+.pm small{font-size:10px;font-weight:700}
+.note{padding:0 32px;color:var(--muted);font-size:12px}
+</style></head><body>
+<nav><span class="mark"><i></i>HackWave</span>
+<div class="tabs"><a class="on">New test</a><a>Live run</a><a>Reports</a></div>
+<div class="addr"><span>Shop address<b>localhost:64012</b></span><span>Model<b>From recordings</b></span></div></nav>
+<main>
+<div class="col">
+<section><h2>Step 1<em>Project</em></h2>
+<div class="proj"><div class="on"><b>HackWave demo shop</b><small>Checked against its order store</small></div>
+<div><b>Any website <span class="tag">UNVERIFIED</span></b><small>By address, explore mode</small></div>
+<div><b>Upload a project</b><small>Coming later</small></div></div></section>
+<section style="border-bottom:0"><h2>Step 2<em>Versions to test, in order</em></h2>
+<div class="vers">
+<div class="v on"><span class="code">A</span><div class="d"><b>The original</b><small>Cart, checkout, shipping, payment, place order</small></div><span class="box"></span></div>
+<div class="v on"><span class="code">B</span><div class="d"><b>The redesign</b><small>Buttons renamed, phone field added, payment moved</small></div><span class="box"></span></div>
+<div class="v on"><span class="code">B1</span><div class="d"><b>Redesign with a backend bug</b><small>Says the order is confirmed, saves nothing</small></div><span class="box"></span></div>
+<div class="v"><span class="code">B2</span><div class="d"><b>Redesign with a pricing bug</b><small>Saves the order at the wrong total</small></div><span class="box"></span></div>
+</div></section>
+</div>
+<div class="right">
+<section><h2>Step 3<em>Goal, in plain words</em></h2>
+<textarea>As a shopper, buy the Trail Runner shoes with a valid credit card and reach order confirmation.</textarea>
+<div class="chips"><span>Recorded goal, runs offline</span><span>Complete checkout with a valid credit card</span></div>
+<div class="run"><button>Run test on 3 versions</button><small>About 50 seconds</small></div></section>
+<div class="ad"><h3>What comes back: the acknowledgement</h3>
+<div class="line"><span>The page claimed</span>Thanks! Order ORD-4821 is on its way</div>
+<div class="line"><span>The store holds</span>No new order</div>
+<div class="line"><span>Signed by</span>The verifier, plain code</div>
+<div class="pm"><div><b>RED</b><small>REAL BUG<br>11 OCT 2026</small></div></div></div>
+<p class="note">Sample from Version B1. Every run ends with one of these, stamped GREEN, AMBER, RED or GREY.</p>
+</div>
+</main></body></html>

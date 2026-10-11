@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { looksLikeCommit } from './commit';
 import type { LlmAdapter, PromptFile } from './llm';
 import { describeStep, stepIssues } from './step-rules';
-import { screenTree, valueOwnersOf } from './tree';
+import { screenTree, valueOwnersOf, type TreeLimits } from './tree';
 
 /** Steps written for one milestone on one screen; more means it continues on a later screen. */
 export interface Expansion {
@@ -47,7 +47,7 @@ export interface PlannerOptions {
    */
   inputValues: Readonly<Record<string, string>>;
   goalHash: string;
-  tree: { maxNodes: number; maxTextChars: number };
+  tree: TreeLimits;
 }
 
 /** Cache identity of a planned plan: both planner prompts. */

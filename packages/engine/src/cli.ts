@@ -12,7 +12,8 @@ import { formatLint, lintIntentText } from './intent-lint';
 import { loadIntent } from './load';
 import { findRepoRoot } from './paths';
 import { listSnapshots, restoreSnapshot, saveSnapshot } from './snapshot';
-import { exitCodeFor, runIntent, SetupError } from './run';
+import { exitCodeFor, exploreGoal, runIntent, SetupError } from './run';
+import { exploreIntent, parseInputs } from './explore';
 import { fetchCatalog, typedIntent } from './typed-goal';
 import { startUiServer } from './ui/server';
 
@@ -39,6 +40,9 @@ available now:
       [--headed] [--slow-mo <ms>] [--llm-mode live|record|replay]   live by default: a new sentence has no recording
   ui [--port <n>] [--no-open]            the web app: type a goal, pick a version, watch it plan, act, heal and verify
       [--headless] [--slow-mo <ms>]      a browser window is shown with slowMo 300 unless told otherwise
+  explore "<goal>" --target <url>        any website: plans, clicks and heals, but checks nothing, so the result is
+      [--input key=value]...             UNVERIFIED (never a pass); --input gives it words to type, e.g. query="water bottle"
+      [--headless] [--slow-mo <ms>] [--llm-mode live|record|replay]   headed with slowMo 300 unless told otherwise
   lint <intent...>                       checks intent files: JSON, schema, inputs, placeholders; one line per problem
   init <goal> [--id <id>] [--out <file>] scaffolds intents/<id>.json from a goal sentence, with TODOs that lint flags
   snapshot save|restore <name>           copies the plan and locator caches to or from runs/snapshots/<name>
@@ -184,6 +188,7 @@ async function main(argv: string[]): Promise<number> {
   if (command === 'try') return tryGoal(args);
   if (command === 'demo') return demo(args);
   if (command === 'ui') return ui(args);
+  if (command === 'explore') return explore(args);
   console.error(`Unknown command "${command}".\n\n${USAGE}`);
   return 2;
 }
@@ -294,6 +299,55 @@ async function demo(args: string[]): Promise<number> {
     quiet: false,
   });
   return result.problems.length === 0 ? 0 : 1;
+}
+
+/**
+ * A goal on any website, with no verifier: the engine plans, acts and heals as usual, then reports UNVERIFIED.
+ * Exit 0 when every step ran and the engine believes the goal was reached, 2 otherwise; never a pass.
+ */
+async function explore(args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args,
+    strict: true,
+    allowPositionals: true,
+    options: {
+      target: { type: 'string' },
+      input: { type: 'string', multiple: true, default: [] },
+      headless: { type: 'boolean', default: false },
+      'slow-mo': { type: 'string' },
+      'llm-mode': { type: 'string' },
+    },
+  });
+  const goal = positionals.join(' ').trim();
+  if (goal.length < 10) {
+    throw new SetupError('explore needs the goal as one sentence, e.g. pnpm engine explore "search for the query and add the first result to the cart" --target https://www.example.com --input query="water bottle"');
+  }
+  if (!values.target) throw new SetupError('explore needs --target <url>, the website to explore');
+  let intent;
+  try {
+    intent = exploreIntent(goal, parseInputs(values.input));
+  } catch (error) {
+    throw new SetupError(error instanceof Error ? error.message : String(error));
+  }
+  console.log(`goal: "${goal}"`);
+  console.log(`  explore mode: nothing checks the outcome against the site's data, so the result will be UNVERIFIED`);
+  console.log(`  words it may type: ${Object.keys(intent.inputs).length > 0 ? Object.keys(intent.inputs).join(', ') : 'none (add --input query="..." if the goal needs typing)'}\n`);
+  try {
+    const result = await exploreGoal({
+      intent,
+      target: values.target,
+      headed: !values.headless,
+      slowMo: values['slow-mo'] === undefined ? DEMO_SLOW_MO_MS : slowMoOf(values['slow-mo']),
+      // A new site has nothing recorded: plan it with the model.
+      envOverride: { LLM_MODE: llmMode(values['llm-mode']) ?? 'live' },
+    });
+    return result.outcome === 'completed' && result.healerBelievedDone.believed ? 0 : 2;
+  } catch (error) {
+    if (error instanceof SetupError && /needs a model/.test(error.message)) {
+      throw new SetupError(`${error.message}\nExplore mode plans with the model: put LLM_API_KEY (and the models) in .env.`);
+    }
+    throw error;
+  }
 }
 
 /** The web app on 127.0.0.1, until Ctrl+C. */

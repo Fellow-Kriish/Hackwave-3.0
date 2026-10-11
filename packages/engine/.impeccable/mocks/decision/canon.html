@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>HackWave · Standard</title>
+<style>
+:root{--bg:#F8FAFC;--panel:#FFFFFF;--ink:#0F172A;--muted:#64748B;--line:#E2E8F0;--blue:#2563EB}
+*{box-sizing:border-box;margin:0}
+body{width:1440px;height:900px;overflow:hidden;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+nav{height:60px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:28px;padding:0 28px}
+.mark{font-weight:800;font-size:19px}
+nav a{color:var(--muted);text-decoration:none;font-weight:500;padding:6px 10px;border-radius:6px}
+nav a.on{background:#EFF6FF;color:var(--blue)}
+nav .r{margin-left:auto;color:var(--muted);font-size:13px}
+main{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:28px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px}
+h2{font-size:16px;margin-bottom:4px}
+p.s{color:var(--muted);font-size:13px;margin-bottom:14px}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:20px}
+.seg span{flex:1;padding:9px 12px;font-size:14px;text-align:center;border-right:1px solid var(--line)}
+.seg span:last-child{border-right:0;color:#94A3B8}
+.seg span.on{background:var(--ink);color:#fff}
+.ver{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:8px;margin-bottom:8px}
+.ver.on{border-color:var(--blue);background:#F8FBFF}
+.cb{width:18px;height:18px;border-radius:4px;border:1.5px solid #94A3B8}
+.ver.on .cb{background:var(--blue);border-color:var(--blue)}
+.ver small{display:block;color:var(--muted);font-size:13px}
+textarea{width:100%;height:120px;border:1px solid var(--line);border-radius:8px;padding:12px;font:16px/1.5 inherit;resize:none}
+button{margin-top:14px;background:var(--blue);color:#fff;border:0;border-radius:8px;padding:12px 22px;font:600 15px inherit}
+.pill{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px}
+.g{background:#DCFCE7;color:#166534}.a{background:#FEF3C7;color:#92400E}.r{background:#FEE2E2;color:#991B1B}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:10px 8px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:500;font-size:13px}
+</style></head><body>
+<nav><span class="mark">HackWave</span><a class="on">New test</a><a>Live run</a><a>Reports</a><span class="r">Shop at localhost:64012</span></nav>
+<main>
+<div class="card"><h2>Project</h2><p class="s">Choose what to test</p>
+<div class="seg"><span class="on">Demo shop</span><span>Any website (unverified)</span><span>Upload (coming later)</span></div>
+<h2>Versions</h2><p class="s">The goal runs on each, in order</p>
+<div class="ver on"><span class="cb"></span><span>Version A<small>The original</small></span></div>
+<div class="ver on"><span class="cb"></span><span>Version B<small>The redesign</small></span></div>
+<div class="ver on"><span class="cb"></span><span>Version B with backend bug<small>Confirms orders, saves nothing</small></span></div>
+<div class="ver"><span class="cb"></span><span>Version B with pricing bug<small>Saves the wrong total</small></span></div></div>
+<div class="card"><h2>Goal, in plain words</h2><p class="s">What should the test do?</p>
+<textarea>As a shopper, buy the Trail Runner shoes with a valid credit card and reach order confirmation.</textarea>
+<button>Run test on 3 versions</button>
+<h2 style="margin-top:26px">Recent runs</h2>
+<table><tr><th>Version</th><th>Result</th><th>Time</th></tr>
+<tr><td>Version A</td><td><span class="pill g">Passed</span></td><td>13.6 s</td></tr>
+<tr><td>Version B</td><td><span class="pill a">Healed</span></td><td>24.5 s</td></tr>
+<tr><td>Version B with backend bug</td><td><span class="pill r">Real bug</span></td><td>13.6 s</td></tr></table></div>
+</main></body></html>

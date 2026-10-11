@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Fingerprint } from './fingerprint';
 import type { Expectation, ScoredCandidate } from './ladder';
 import type { LlmAdapter, PromptFile } from './llm';
-import { inputMark, screenTree } from './tree';
+import { inputMark, screenTree, type TreeLimits } from './tree';
 
 export interface Rung3Request {
   expectation: Expectation;
@@ -24,7 +24,7 @@ export interface Rung3Options {
   prompt: PromptFile;
   /** Goal and input keys only. */
   healer: HealerIntent;
-  tree: { maxNodes: number; maxTextChars: number };
+  tree: TreeLimits;
   /** Used only to mark names on screen that are input values. */
   valueOwners: ReadonlyMap<string, string>;
   candidatesPerStep: number;

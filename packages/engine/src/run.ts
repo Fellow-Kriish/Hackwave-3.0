@@ -8,6 +8,7 @@ import {
   redactForHealer,
   sha256,
   type Budgets,
+  type Intent,
   type Plan,
   type RunRecord,
   type Verdict,
@@ -26,6 +27,7 @@ import { findRepoRoot } from './paths';
 import { cacheablePlan, loadCachedPlan, planCacheFile, savePlanCache } from './plan-cache';
 import { createPlanner, planPromptHash } from './planner';
 import { createExplainer, type Explanation } from './explain';
+import { printExploreBlock, renderExploreReport, type ExploreResult } from './explore';
 import { markdownToHtml } from './html';
 import { banner, printFinalBlock, renderReport, summary, whatChanged, type LocatorChange, type ReportContext } from './report';
 import { createReplanner } from './replanner';
@@ -61,8 +63,19 @@ export interface RunOptions {
   onEvent?: (event: EngineEvent) => void;
 }
 
+/** A screenshot taken where the run changed course or failed, kept in the run folder for the report. */
+export interface RunShot {
+  /** Relative to the run folder, e.g. shots/01-checkout.proceed.png */
+  file: string;
+  kind: 'healed' | 'replanned' | 'unresolved' | 'stopped';
+  stepKey: string | null;
+  caption: string;
+}
+
 export interface RunResult {
   verdict: Verdict;
+  /** Screens at every change or failure, in the order they happened. */
+  shots: RunShot[];
   runDir: string;
   planSource: PlanSourceKind;
   /** The report's one sentence, and for AMBER its plain-English "What changed". */
@@ -91,13 +104,34 @@ function parseTarget(target: string): URL {
   return url;
 }
 
+const isLocal = (url: URL) => ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+
 async function preflight(url: URL): Promise<void> {
   try {
-    await fetch(url, { signal: AbortSignal.timeout(3000) });
+    // A real site can take seconds to answer a request that is not from a browser; the local shops answer at once.
+    await fetch(url, { signal: AbortSignal.timeout(isLocal(url) ? 3000 : 20_000) });
   } catch (error) {
     const cause = error instanceof Error && error.cause instanceof Error ? error.cause : null;
     const why = cause ? cause.message || (cause as NodeJS.ErrnoException).code || cause.name : String(error);
-    throw new SetupError(`${url.origin} is not reachable (${why}). Start the shops (pnpm shop) and run pnpm engine doctor.`);
+    const hint = isLocal(url) ? ' Start the shops (pnpm shop) and run pnpm engine doctor.' : ' Check the address and your internet connection.';
+    throw new SetupError(`${url.origin} is not reachable (${why}).${hint}`);
+  }
+}
+
+/** Which events earn a screenshot, and what the report says under it. */
+function shotFor(e: Record<string, unknown>): Omit<RunShot, 'file'> | null {
+  const stepKey = typeof e.stepKey === 'string' ? e.stepKey : null;
+  switch (e.type) {
+    case 'resolved':
+      return Number(e.rung) > 1 ? { kind: 'healed', stepKey, caption: `Found ${String(e.target)} instead of ${String(e.planned)} (rung ${String(e.rung)})` } : null;
+    case 'replanned':
+      return { kind: 'replanned', stepKey: typeof e.milestoneKey === 'string' ? e.milestoneKey : null, caption: `Re-planned ${String(e.milestoneKey)}: ${String(e.why)}` };
+    case 'unresolved':
+      return { kind: 'unresolved', stepKey, caption: `Could not find ${String(e.target)}` };
+    case 'stopped':
+      return { kind: 'stopped', stepKey, caption: `Stopped: ${String(e.message)}` };
+    default:
+      return null;
   }
 }
 
@@ -110,9 +144,23 @@ function asSetupError<T>(work: () => T): T {
 }
 
 export async function runIntent(options: RunOptions): Promise<RunResult> {
+  return (await runCore(options, null)) as RunResult;
+}
+
+export interface ExploreOptions extends Pick<RunOptions, 'target' | 'headed' | 'slowMo' | 'quiet' | 'envOverride' | 'onEvent'> {
+  intent: Intent;
+}
+
+/** Explore mode: plan, act and heal on any site with no verifier, so the result is UNVERIFIED (see explore.ts). */
+export async function exploreGoal(options: ExploreOptions): Promise<ExploreResult> {
+  return (await runCore({ ...options, intentFile: '' }, options.intent)) as ExploreResult;
+}
+
+async function runCore(options: RunOptions, explored: Intent | null): Promise<RunResult | ExploreResult> {
   const root = findRepoRoot();
   const config = loadConfig(root);
-  const intent = asSetupError(() => loadIntent(resolve(options.intentFile)));
+  const explore = explored !== null;
+  const intent = explored ?? asSetupError(() => loadIntent(resolve(options.intentFile)));
   const goalHash = sha256(intent.goal);
 
   // The engine boundary: the executor and planner get goal + input keys (values by key only for filling); only the verifier gets the oracle.
@@ -195,8 +243,11 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
   });
   // Hand-written plans get the planner too, but only ever for a re-planned milestone that continues on a later
   // screen: they arrive fully expanded and are never written to the plan cache.
-  const planner = createPlanner({ llm, prompts, healer, inputValues: inputs, goalHash, tree: config.tree });
-  const replanner = createReplanner({ llm, prompt: replanPrompt, healer, inputValues: inputs, tree: config.tree });
+  // Explore mode meets real pages far bigger than the demo shop: a smaller tree that is trimmed rather than refused,
+  // so one request stays inside a free-tier token-per-minute limit.
+  const tree = explore ? { maxNodes: 220, maxTextChars: 60, overflow: 'trim' as const } : config.tree;
+  const planner = createPlanner({ llm, prompts, healer, inputValues: inputs, goalHash, tree });
+  const replanner = createReplanner({ llm, prompt: replanPrompt, healer, inputValues: inputs, tree });
   const locators = LocatorCache.load(root, intent.id, planSource === 'hand-written');
   // A second, untouched copy: the report shows each entry the run wrote against what it held before.
   const locatorsBefore = LocatorCache.load(root, intent.id, planSource === 'hand-written');
@@ -207,20 +258,23 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
     llm,
     prompt: resolvePrompt,
     healer,
-    tree: config.tree,
+    tree,
     valueOwners: valueOwnersOf(inputs),
     candidatesPerStep: config.ladder.candidatesPerStep,
     fullTreeBelowScore: config.ladder.fullTreeBelowScore,
   });
 
-  const verifier = createVerifier(intent, { origin, evidenceDir: join(runDir, 'evidence'), defaultPollMs: config.verifier.pollMs });
-  let baseline;
-  try {
-    baseline = await verifier.baseline();
-  } catch (error) {
-    throw new SetupError(`cannot read the store before the run: ${error instanceof Error ? error.message : String(error)}`);
+  // Explore mode has no source of truth to read, so no verifier at all: the result can only be UNVERIFIED.
+  const verifier = explore ? null : createVerifier(intent, { origin, evidenceDir: join(runDir, 'evidence'), defaultPollMs: config.verifier.pollMs });
+  if (verifier) {
+    let baseline;
+    try {
+      baseline = await verifier.baseline();
+    } catch (error) {
+      throw new SetupError(`cannot read the store before the run: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    events.emit('verifier_baseline', { count: baseline.count, maxId: baseline.maxId });
   }
-  events.emit('verifier_baseline', { count: baseline.count, maxId: baseline.maxId });
 
   const browser = await chromium.launch({ headless: !options.headed, slowMo: options.slowMo ?? 0 });
   try {
@@ -230,18 +284,44 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
       viewport,
       ...(options.video ? { recordVideo: { dir: join(runDir, 'video-raw'), size: viewport } } : {}),
     });
-    // Blast radius: no HTTP outside the app.
+    // Blast radius: no HTTP outside the app. Explore mode lets a real site load its images and scripts from its other
+    // domains; navigation steps still stay on the site's own origin (checkAllowed).
     await context.route('**/*', async (route) => {
       const url = route.request().url();
-      if (sameOrigin(url, origin) || url.startsWith('data:')) return route.continue();
+      if (explore || sameOrigin(url, origin) || url.startsWith('data:')) return route.continue();
       events.emit('blocked_request', { url });
       return route.abort('blockedbyclient');
     });
+    // Real sites open some links in a new tab, which would leave the run on the old page: explore keeps them in one.
+    if (explore) {
+      await context.addInitScript(
+        "document.addEventListener('click', (event) => { const link = event.target instanceof Element ? event.target.closest('a[target]') : null; if (link) link.target = '_self'; }, true);",
+      );
+    }
     const page = await context.newPage();
     page.on('dialog', (dialog) => {
       events.emit('dialog_dismissed', { dialogType: dialog.type() });
       void dialog.dismiss().catch(() => undefined);
     });
+
+    // The screen at every change or failure: a control found another way, a section re-planned, a step not found, a stop.
+    const shots: RunShot[] = [];
+    const shooting: Promise<void>[] = [];
+    events.onEvent((event) => {
+      const shot = shotFor(event as EngineEvent & Record<string, unknown>);
+      if (!shot) return;
+      const file = `shots/${String(shooting.length + 1).padStart(2, '0')}-${(shot.stepKey ?? shot.kind).replace(/[^a-z0-9.-]+/gi, '-')}.png`;
+      shooting.push(
+        page
+          .screenshot({ path: join(runDir, file), timeout: 4000 })
+          .then(() => void shots.push({ file, ...shot }))
+          .catch(() => undefined),
+      );
+    });
+    const takenShots = async () => {
+      await Promise.all(shooting);
+      return shots.sort((a, b) => a.file.localeCompare(b.file));
+    };
 
     // A hang still reports what the run did before it: actions, rungs and heals (heals are in the locator cache).
     let snapshot: ExecutionSnapshot | null = null;
@@ -324,6 +404,40 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
       timings: timings.summary(),
     };
 
+    if (!verifier) {
+      const screenshot = await page
+        .screenshot({ path: join(runDir, 'final.png') })
+        .then(() => 'final.png')
+        .catch(() => null);
+      const finalHeading = await page
+        .locator('h1')
+        .first()
+        .innerText({ timeout: 1000 })
+        .then((text) => text.replace(/\s+/g, ' ').trim().slice(0, 120) || null)
+        .catch(() => null);
+      const result: ExploreResult = {
+        runDir,
+        outcome: record.outcome,
+        reason: record.reason,
+        healerBelievedDone: record.healerBelievedDone,
+        actions: record.actions,
+        milestones: started,
+        finalUrl: page.url(),
+        finalTitle: await page.title().catch(() => ''),
+        finalHeading,
+        llmCalls: record.llmCalls.total,
+        screenshot,
+        shots: await takenShots(),
+      };
+      writeJson('run-record.json', record);
+      const markdown = renderExploreReport(intent.goal, targetUrl.toString(), executedPlan, result);
+      writeFileSync(join(runDir, 'report.md'), markdown);
+      writeFileSync(join(runDir, 'report.html'), markdownToHtml(markdown, `UNVERIFIED · ${intent.id}`));
+      if (!options.quiet) printExploreBlock(result);
+      return result;
+    }
+
+    const runShots = await takenShots();
     const oracle = await verifier.verify(page, record);
     events.emit('verifier_result', { state: oracle.state, binding: oracle.binding, alerts: oracle.alerts });
     const verdict = decideVerdict(oracle, record);
@@ -380,6 +494,7 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
     }
     return {
       verdict,
+      shots: runShots,
       runDir,
       planSource,
       summary: summary(verdict, reportContext),

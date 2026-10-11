@@ -83,6 +83,16 @@ function truncate(text: string, max: number): string {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
+export interface TreeLimits {
+  maxNodes: number;
+  maxTextChars: number;
+  /**
+   * What an oversized tree gets: refused (tests, the default), or, in explore mode on real sites, trimmed: the options
+   * of closed dropdowns are hidden and the tree is cut to its top, with a note saying how much is not shown.
+   */
+  overflow?: 'refuse' | 'trim';
+}
+
 export interface PrunedTree {
   text: string;
   nodes: number;
@@ -92,9 +102,10 @@ export interface PrunedTree {
  * Tree budget, enforced before any model call: keep interactive, landmark and heading nodes (plus named
  * containers and announcements), truncate text, hard-cap the node count. Over the cap is refused, never cut.
  */
-export function pruneAriaSnapshot(snapshot: string, limits: { maxNodes: number; maxTextChars: number }): PrunedTree {
+export function pruneAriaSnapshot(snapshot: string, limits: TreeLimits): PrunedTree {
+  const trim = limits.overflow === 'trim';
   const lines: string[] = [];
-  const stack: { indent: number; kept: boolean; announcement: boolean }[] = [];
+  const stack: { indent: number; kept: boolean; announcement: boolean; closedDropdown: boolean }[] = [];
   for (const raw of snapshot.split('\n')) {
     const match = /^(\s*)- (.*)$/.exec(raw);
     if (!match) continue;
@@ -102,8 +113,11 @@ export function pruneAriaSnapshot(snapshot: string, limits: { maxNodes: number; 
     while (stack.length > 0 && (stack[stack.length - 1]?.indent ?? -1) >= indent) stack.pop();
     const node = parseLine(match[2] ?? '');
     const insideAnnouncement = stack.some((entry) => entry.announcement);
+    // Trim mode: a closed dropdown's options are noise (one real site lists 50 departments); its selected one stays.
+    const hiddenOption = trim && node?.role === 'option' && stack.some((entry) => entry.closedDropdown) && !node.attrs.includes('[selected]');
     const keep =
       node !== null &&
+      !hiddenOption &&
       (INTERACTIVE.has(node.role) ||
         LANDMARKS.has(node.role) ||
         node.role === 'heading' ||
@@ -122,7 +136,17 @@ export function pruneAriaSnapshot(snapshot: string, limits: { maxNodes: number; 
       }
       lines.push(line);
     }
-    stack.push({ indent, kept: Boolean(node && keep), announcement: Boolean(node && keep && ANNOUNCEMENTS.has(node.role)) });
+    stack.push({
+      indent,
+      kept: Boolean(node && keep),
+      announcement: Boolean(node && keep && ANNOUNCEMENTS.has(node.role)),
+      closedDropdown: Boolean(node && keep && (node.role === 'combobox' || node.role === 'listbox') && !node.attrs.includes('[expanded]')),
+    });
+  }
+  if (lines.length > limits.maxNodes && trim) {
+    const shown = lines.slice(0, limits.maxNodes - 1);
+    shown.push(`- note "showing the top ${shown.length} of ${lines.length} elements; the rest of the page is not shown"`);
+    return { text: shown.join('\n'), nodes: shown.length };
   }
   if (lines.length > limits.maxNodes) {
     throw new OutcomeError(
@@ -167,7 +191,7 @@ export function inputMark(name: string, valueOwners: ReadonlyMap<string, string>
  */
 export async function screenTree(
   page: Page,
-  limits: { maxNodes: number; maxTextChars: number },
+  limits: TreeLimits,
   valueOwners: ReadonlyMap<string, string>,
 ): Promise<{ path: string; tree: PrunedTree }> {
   const snapshot = await page.locator('body').ariaSnapshot({ timeout: 3000 });

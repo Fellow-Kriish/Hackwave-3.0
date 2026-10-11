@@ -188,6 +188,20 @@ recording, so `try` calls the model live: it needs `LLM_API_KEY` in `.env` (the 
 scratch tests under `runs/typed/`; `--save` keeps one as `intents/<id>.json`, a test like any other. In
 `demo-menu.bat` it is option T.
 
+## Explore any website (no verifier: UNVERIFIED)
+
+```sh
+pnpm engine explore "search for the query and add the first result to the cart" --target https://www.amazon.in/ --input query="water bottle"
+```
+
+Explore mode runs the same planner, ladder and healing on any website, in a visible browser, but there is no source of
+truth to read, so nothing checks the outcome: the result is **UNVERIFIED**, a walkthrough rather than a test, and never a
+pass. `--input key=value` (repeatable) gives it words to type; the AI sees only the key. Differences from a test: the
+site may load images and scripts from its other domains (navigation still stays on the site), links open in the same
+tab, an oversized page is trimmed to its top (closed dropdowns hidden) instead of refused, and the budgets are 180 s per
+run and 20 s per step. Plans and locators are cached as `explore-*` scratch files. It needs `LLM_API_KEY`; a big page
+costs about 4-5k tokens per AI call, so a free-tier daily token limit goes quickly. In `demo-menu.bat` it is option E.
+
 ## Intents: lint and init
 
 ```sh
