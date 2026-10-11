@@ -21,6 +21,12 @@ runs/locators/*.hand.json
 # goals typed with `pnpm engine try` are scratch tests: their plan and locator caches stay local
 runs/plans/typed-*.json
 runs/locators/typed-*.json
+# explore runs (any site, no verifier) are scratch too
+runs/plans/explore-*.json
+runs/locators/explore-*.json
+# impeccable: per-developer settings and caches
+.impeccable/config.local.json
+.impeccable/hook.cache.json
 
 test-results/
 playwright-report/

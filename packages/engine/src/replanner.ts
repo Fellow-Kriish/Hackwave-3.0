@@ -5,7 +5,7 @@ import { looksLikeCommit } from './commit';
 import type { LlmAdapter, PromptFile } from './llm';
 import { milestoneLine } from './planner';
 import { describeStep, stepIssues } from './step-rules';
-import { redactValues, screenTree, valueOwnersOf } from './tree';
+import { redactValues, screenTree, valueOwnersOf, type TreeLimits } from './tree';
 
 /** Everything rung 5 is told about one milestone that the ladder could not carry on. Never an input value. */
 export interface ReplanRequest {
@@ -47,7 +47,7 @@ export interface ReplannerOptions {
   healer: HealerIntent;
   /** Used only to check replies (a name equal to an input value must be a nameRef), never put into a prompt. */
   inputValues: Readonly<Record<string, string>>;
-  tree: { maxNodes: number; maxTextChars: number };
+  tree: TreeLimits;
 }
 
 const list = (lines: string[]) => (lines.length > 0 ? lines : ['(none)']);

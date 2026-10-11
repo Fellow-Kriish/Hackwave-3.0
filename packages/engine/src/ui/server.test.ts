@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { findRepoRoot } from '../paths';
-import { GUIDED_STEPS, knownIntentFor, resolveRunFile, startUiServer, type UiServer } from './server';
+import { GUIDED_STEPS, knownIntentFor, parseBatch, resolveRunFile, startUiServer, type UiServer } from './server';
 
 const root = findRepoRoot();
 
@@ -39,6 +39,29 @@ describe('goals with recorded answers', () => {
 
   it('runs the guided demo as the stage script does: A from scratch, then B, B broken, B again', () => {
     expect(GUIDED_STEPS.map((step) => `${step.version}${step.fresh ? ' fresh' : ''}`)).toEqual(['v1 fresh', 'v2', 'v2-broken', 'v2']);
+  });
+});
+
+describe('what a test request becomes', () => {
+  const goal = 'Complete checkout with a valid credit card';
+
+  it('runs the picked versions in order, forgetting what was learned only before the first', () => {
+    const batch = parseBatch({ project: 'shop', goal, versions: ['v1', 'v2', 'v2-broken'], fresh: true }, false);
+    expect(typeof batch === 'string' ? batch : batch.runs.map((run) => `${run.code}${run.fresh ? ' fresh' : ''}`)).toEqual(['A fresh', 'B', 'B1']);
+    expect(parseBatch({ project: 'shop', goal, versions: [] }, false)).toBe('pick at least one version');
+    expect(parseBatch({ project: 'shop', goal, versions: ['v9'] }, false)).toBe('unknown version "v9"');
+  });
+
+  it('turns the guided demo into a preset batch, whatever versions were ticked', () => {
+    const batch = parseBatch({ project: 'shop', goal, versions: ['v2-wrong-total'] }, true);
+    expect(typeof batch === 'string' ? batch : batch.runs.map((run) => run.code)).toEqual(['A', 'B', 'B1', 'B']);
+  });
+
+  it('explores a website only at an http or https address, with optional words to type', () => {
+    const batch = parseBatch({ project: 'website', goal, url: 'https://www.example.com/', query: '  water   bottle ' }, false);
+    expect(batch).toMatchObject({ project: 'website', url: 'https://www.example.com/', query: 'water bottle', runs: [{ code: 'W', name: 'www.example.com' }] });
+    expect(parseBatch({ project: 'website', goal, url: 'not a url' }, false)).toBe('give the website address, e.g. https://www.example.com');
+    expect(parseBatch({ project: 'website', goal, url: 'file:///etc/passwd' }, false)).toBe('the website address must start with http:// or https://');
   });
 });
 
