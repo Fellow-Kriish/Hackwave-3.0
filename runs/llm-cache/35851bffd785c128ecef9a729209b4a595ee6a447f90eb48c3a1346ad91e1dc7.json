@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "35851bffd785c128ecef9a729209b4a595ee6a447f90eb48c3a1346ad91e1dc7",
+  "stage": "replanner",
+  "prompt": "replan",
+  "promptVersion": "replan/1",
+  "promptHash": "a296606dff123571138c7235d114a1dfab2e6e7ba0e2aa15405bbc592cbaa406",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "a264c8f4f8b3c06c5332506238a7e37ec06f71bff97e3f43beaa7b4a372d5f99",
+  "text": "{\"steps\":[],\"more\":false,\"reason\":\"The requested product (Moon Boot) is not present on this screen and there is no element to navigate to it, so the cart milestone cannot proceed here.\"}",
+  "usage": {
+    "input": 1455,
+    "output": 271
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T07:25:13.554Z"
+}

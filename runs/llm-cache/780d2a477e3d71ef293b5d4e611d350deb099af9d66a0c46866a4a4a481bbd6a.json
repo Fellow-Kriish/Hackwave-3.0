@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "780d2a477e3d71ef293b5d4e611d350deb099af9d66a0c46866a4a4a481bbd6a",
+  "stage": "expand",
+  "prompt": "expand",
+  "promptVersion": "expand/11",
+  "promptHash": "77e37049dca1e32823c50d3ffadace758f83a5f46698a8112f48095f29d2c1cc",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "4103a4f4db1aec1213b8c58fa0ab68b71b897c52213f0a6ce2ba807401d5353f",
+  "text": "{\"milestones\":[{\"milestone\":\"product-list\",\"steps\":[{\"key\":\"product-list.browse\",\"action\":\"click\",\"target\":{\"role\":\"link\",\"name\":\"New arrivals\"}}],\"more\":true}]}",
+  "usage": {
+    "input": 1617,
+    "output": 896
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T07:25:21.001Z"
+}

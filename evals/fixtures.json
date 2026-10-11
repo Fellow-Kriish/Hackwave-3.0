@@ -6,7 +6,14 @@
     "target": "v1",
     "plan": "evals/plans/checkout.v1.json",
     "cache": "empty",
-    "expect": { "color": "GREEN", "kind": "passed", "healerBelievedDone": true, "heals": 0, "replans": 0, "maxLlmCalls": 0 }
+    "expect": {
+      "color": "GREEN",
+      "kind": "passed",
+      "healerBelievedDone": true,
+      "heals": 0,
+      "replans": 0,
+      "maxLlmCalls": 0
+    }
   },
   {
     "name": "v2-hand",
@@ -15,7 +22,14 @@
     "target": "v2",
     "plan": "evals/plans/checkout.v2.json",
     "cache": "empty",
-    "expect": { "color": "GREEN", "kind": "passed", "healerBelievedDone": true, "heals": 0, "replans": 0, "maxLlmCalls": 0 }
+    "expect": {
+      "color": "GREEN",
+      "kind": "passed",
+      "healerBelievedDone": true,
+      "heals": 0,
+      "replans": 0,
+      "maxLlmCalls": 0
+    }
   },
   {
     "name": "v2-broken-hand",
@@ -27,8 +41,12 @@
     "expect": {
       "color": "RED",
       "kind": "real_bug",
-      "failedChecks": ["state"],
-      "reasonCodes": ["state_delta_failed"],
+      "failedChecks": [
+        "state"
+      ],
+      "reasonCodes": [
+        "state_delta_failed"
+      ],
       "healerBelievedDone": true,
       "heals": 0
     }
@@ -44,28 +62,50 @@
     "expect": {
       "color": "RED",
       "kind": "real_bug",
-      "failedChecks": ["state"],
-      "messageIncludes": ["total 999", "1299"],
+      "failedChecks": [
+        "state"
+      ],
+      "messageIncludes": [
+        "total 999",
+        "1299"
+      ],
       "healerBelievedDone": true
     }
   },
   {
     "name": "drift-needs-replan",
-    "description": "v2 with the v1 plan: rung 3 heals the cart and checkout buttons, then the payment fields are not on v2's shipping screen; that needs a milestone re-plan (rung 5, P4), so it refuses to guess.",
+    "description": "v2 with the v1 plan and no locator cache: rung 3 heals the renamed buttons, shipping goes before payment (adaptive order), and rung 5 re-plans payment around the new Phone field and the extra screen. The healer does not believe it is done (the v1 plan looks for \"Order confirmed\"); the store decides.",
     "intent": "intents/checkout.json",
     "target": "v2",
     "plan": "evals/plans/checkout.v1.json",
     "cache": "empty",
-    "expect": { "color": "RED", "kind": "unresolvable", "reasonCodes": ["unresolved"], "messageIncludes": ["Card number"], "minHealsAtRung": { "3": 1 } }
+    "expect": {
+      "color": "AMBER",
+      "kind": "ui_drift",
+      "minHealsAtRung": {
+        "3": 1
+      },
+      "minReplans": 1,
+      "maxLlmCalls": 8
+    }
   },
   {
     "name": "unresolvable-hand",
-    "description": "v2, an intent for a product that does not exist: the product card is a required scope, so nothing is guessed and no model is asked.",
+    "description": "v2, an intent for a product that does not exist: the product card is a required scope, so rungs 2 and 3 guess nothing; rung 5 finds no way to it and the run stops RED within budget.",
     "intent": "intents/checkout-missing-product.json",
     "target": "v2",
     "plan": "evals/plans/checkout.v2.json",
     "cache": "empty",
-    "expect": { "color": "RED", "kind": "unresolvable", "reasonCodes": ["unresolved"], "messageIncludes": ["Moon Boot"], "heals": 0, "maxLlmCalls": 0 }
+    "expect": {
+      "color": "RED",
+      "kind": "unresolvable",
+      "messageIncludes": [
+        "Moon Boot"
+      ],
+      "heals": 0,
+      "replans": 0,
+      "maxLlmCalls": 2
+    }
   },
   {
     "name": "env-down",
@@ -79,8 +119,13 @@
     "expect": {
       "color": "GREY",
       "kind": "environment",
-      "reasonCodes": ["store_unreachable", "network_error"],
-      "messageIncludes": ["ERR_CONNECTION_REFUSED"]
+      "reasonCodes": [
+        "store_unreachable",
+        "network_error"
+      ],
+      "messageIncludes": [
+        "ERR_CONNECTION_REFUSED"
+      ]
     }
   },
   {
@@ -89,7 +134,13 @@
     "intent": "intents/checkout.json",
     "target": "v1",
     "cache": "empty",
-    "expect": { "color": "GREEN", "kind": "passed", "planSource": "planner", "heals": 0, "maxLlmCalls": 4 }
+    "expect": {
+      "color": "GREEN",
+      "kind": "passed",
+      "planSource": "planner",
+      "heals": 0,
+      "maxLlmCalls": 4
+    }
   },
   {
     "name": "v1-cached",
@@ -97,7 +148,13 @@
     "intent": "intents/checkout.json",
     "target": "v1",
     "cache": "after:v1-baseline",
-    "expect": { "color": "GREEN", "kind": "passed", "planSource": "cache", "heals": 0, "maxLlmCalls": 0 }
+    "expect": {
+      "color": "GREEN",
+      "kind": "passed",
+      "planSource": "cache",
+      "heals": 0,
+      "maxLlmCalls": 0
+    }
   },
   {
     "name": "heal-warm-v1",
@@ -106,7 +163,12 @@
     "target": "v1",
     "plan": "evals/plans/checkout.v1.json",
     "cache": "empty",
-    "expect": { "color": "GREEN", "kind": "passed", "heals": 0, "maxLlmCalls": 0 }
+    "expect": {
+      "color": "GREEN",
+      "kind": "passed",
+      "heals": 0,
+      "maxLlmCalls": 0
+    }
   },
   {
     "name": "heal-v2",
@@ -115,7 +177,16 @@
     "target": "v2",
     "plan": "evals/plans/checkout.reflowed.json",
     "cache": "after:heal-warm-v1",
-    "expect": { "color": "AMBER", "kind": "ui_drift", "minHealsAtRung": { "2": 1, "3": 1 }, "maxLlmCalls": 3, "healerBelievedDone": true }
+    "expect": {
+      "color": "AMBER",
+      "kind": "ui_drift",
+      "minHealsAtRung": {
+        "2": 1,
+        "3": 1
+      },
+      "maxLlmCalls": 3,
+      "healerBelievedDone": true
+    }
   },
   {
     "name": "heal-v2-cached",
@@ -124,7 +195,12 @@
     "target": "v2",
     "plan": "evals/plans/checkout.reflowed.json",
     "cache": "after:heal-v2",
-    "expect": { "color": "GREEN", "kind": "passed", "heals": 0, "maxLlmCalls": 0 }
+    "expect": {
+      "color": "GREEN",
+      "kind": "passed",
+      "heals": 0,
+      "maxLlmCalls": 0
+    }
   },
   {
     "name": "heal-v2-broken",
@@ -133,7 +209,105 @@
     "target": "v2-broken",
     "plan": "evals/plans/checkout.reflowed.json",
     "cache": "after:heal-v2-cached",
-    "expect": { "color": "RED", "kind": "real_bug", "failedChecks": ["state"], "heals": 0, "maxLlmCalls": 0, "healerBelievedDone": true }
+    "expect": {
+      "color": "RED",
+      "kind": "real_bug",
+      "failedChecks": [
+        "state"
+      ],
+      "heals": 0,
+      "maxLlmCalls": 0,
+      "healerBelievedDone": true
+    }
+  },
+  {
+    "name": "v2-drift",
+    "description": "v2 from the committed caches (act 1: the v1 plan and v1-warm locators): at least one rung-2, one rung-3 and one re-plan event; locator and plan caches updated.",
+    "intent": "intents/checkout.json",
+    "target": "v2",
+    "cache": "committed",
+    "expect": {
+      "color": "AMBER",
+      "kind": "ui_drift",
+      "planSource": "cache",
+      "healerBelievedDone": true,
+      "minHealsAtRung": {
+        "2": 1,
+        "3": 1
+      },
+      "minReplans": 1,
+      "maxLlmCalls": 8
+    }
+  },
+  {
+    "name": "v2-cached",
+    "description": "v2 after v2-drift: every step on rung 1, 0 LLM calls; the report names the healing run.",
+    "intent": "intents/checkout.json",
+    "target": "v2",
+    "cache": "after:v2-drift",
+    "expect": {
+      "color": "GREEN",
+      "kind": "passed",
+      "planSource": "cache",
+      "heals": 0,
+      "replans": 0,
+      "maxLlmCalls": 0,
+      "reportIncludes": [
+        "Locators healed earlier by run"
+      ]
+    }
+  },
+  {
+    "name": "v2-broken",
+    "description": "v2-broken after v2-drift: 0 heals; state-delta failure; healerBelievedDone true.",
+    "intent": "intents/checkout.json",
+    "target": "v2-broken",
+    "cache": "after:v2-drift",
+    "expect": {
+      "color": "RED",
+      "kind": "real_bug",
+      "failedChecks": [
+        "state"
+      ],
+      "healerBelievedDone": true,
+      "heals": 0,
+      "replans": 0,
+      "maxLlmCalls": 0
+    }
+  },
+  {
+    "name": "v2-wrong-total",
+    "description": "v2-wrong-total after v2-drift: the total mismatch is named with both values.",
+    "intent": "intents/checkout.json",
+    "target": "v2-wrong-total",
+    "privateShop": true,
+    "cache": "after:v2-drift",
+    "expect": {
+      "color": "RED",
+      "kind": "real_bug",
+      "failedChecks": [
+        "state"
+      ],
+      "messageIncludes": [
+        "total 999",
+        "1299"
+      ],
+      "heals": 0,
+      "maxLlmCalls": 0
+    }
+  },
+  {
+    "name": "unresolvable",
+    "description": "v2 after v2-drift, an intent for a product that does not exist (planned from scratch): RED unresolvable within budget, no hang.",
+    "intent": "intents/checkout-missing-product.json",
+    "target": "v2",
+    "cache": "after:v2-drift",
+    "expect": {
+      "color": "RED",
+      "kind": "unresolvable",
+      "heals": 0,
+      "maxLlmCalls": 8
+    }
   },
   {
     "name": "provider-switch",
@@ -142,53 +316,13 @@
     "target": "v1",
     "cache": "empty",
     "providerSwitch": true,
-    "expect": { "color": "GREEN", "kind": "passed", "planSource": "planner", "heals": 0, "maxLlmCalls": 4 }
-  },
-  {
-    "name": "v2-drift",
-    "description": "v2 from snapshots/post-act-1: at least one rung-2, one rung-3 and one re-plan event; locator cache updated.",
-    "pending": "P4",
-    "intent": "intents/checkout.json",
-    "target": "v2",
-    "cache": "snapshot:post-act-1",
-    "expect": { "color": "AMBER", "kind": "ui_drift" }
-  },
-  {
-    "name": "v2-cached",
-    "description": "v2 after v2-drift: 0 LLM calls; the report names the healing run.",
-    "pending": "P4",
-    "intent": "intents/checkout.json",
-    "target": "v2",
-    "cache": "after:v2-drift",
-    "expect": { "color": "GREEN", "maxLlmCalls": 0 }
-  },
-  {
-    "name": "v2-broken",
-    "description": "v2-broken after v2-drift: 0 heals; state-delta failure; healerBelievedDone true.",
-    "pending": "P4",
-    "intent": "intents/checkout.json",
-    "target": "v2-broken",
-    "cache": "after:v2-drift",
-    "expect": { "color": "RED", "kind": "real_bug", "failedChecks": ["state"], "healerBelievedDone": true, "heals": 0 }
-  },
-  {
-    "name": "v2-wrong-total",
-    "description": "v2-wrong-total after v2-drift: total mismatch named with both values.",
-    "pending": "P4",
-    "intent": "intents/checkout.json",
-    "target": "v2-wrong-total",
-    "privateShop": true,
-    "cache": "after:v2-drift",
-    "expect": { "color": "RED", "kind": "real_bug", "messageIncludes": ["total 999", "1299"] }
-  },
-  {
-    "name": "unresolvable",
-    "description": "v2 after v2-drift, an intent for a product that does not exist: RED unresolvable within budget, no hang.",
-    "pending": "P4",
-    "intent": "intents/checkout-missing-product.json",
-    "target": "v2",
-    "cache": "after:v2-drift",
-    "expect": { "color": "RED", "kind": "unresolvable" }
+    "expect": {
+      "color": "GREEN",
+      "kind": "passed",
+      "planSource": "planner",
+      "heals": 0,
+      "maxLlmCalls": 4
+    }
   },
   {
     "name": "replay-complete",
@@ -196,6 +330,8 @@
     "pending": "P6",
     "intent": "intents/checkout.json",
     "cache": "committed",
-    "expect": { "color": "GREEN" }
+    "expect": {
+      "color": "GREEN"
+    }
   }
 ]

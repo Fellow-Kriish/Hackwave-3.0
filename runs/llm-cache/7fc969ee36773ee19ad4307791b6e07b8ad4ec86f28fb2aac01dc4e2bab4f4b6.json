@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "7fc969ee36773ee19ad4307791b6e07b8ad4ec86f28fb2aac01dc4e2bab4f4b6",
+  "stage": "replanner",
+  "prompt": "replan",
+  "promptVersion": "replan/1",
+  "promptHash": "a296606dff123571138c7235d114a1dfab2e6e7ba0e2aa15405bbc592cbaa406",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "a2d4d1597e6f6daf37b07eb2639b8b50f093de543782086146b9016c5e858035",
+  "text": "{\"steps\":[],\"more\":false,\"reason\":\"The new arrivals list does not contain the Moon Boot shoes and there is no navigation to another list, so the milestone cannot be progressed on this screen.\"}",
+  "usage": {
+    "input": 1457,
+    "output": 271
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T07:25:22.964Z"
+}

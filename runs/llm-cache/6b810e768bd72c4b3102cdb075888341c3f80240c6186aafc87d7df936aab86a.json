@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "6b810e768bd72c4b3102cdb075888341c3f80240c6186aafc87d7df936aab86a",
+  "stage": "replanner",
+  "prompt": "replan",
+  "promptVersion": "replan/1",
+  "promptHash": "a296606dff123571138c7235d114a1dfab2e6e7ba0e2aa15405bbc592cbaa406",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "500b03f55e2a2bbcecb81ab25a0eca6e4cc981a1a7bf62354fb156980408741e",
+  "text": "{\"steps\":[{\"key\":\"payment.phone\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Phone\"},\"inputRef\":\"shipping.phone\"},{\"key\":\"payment.continue\",\"action\":\"click\",\"target\":{\"role\":\"button\",\"name\":\"Continue to payment\"}}],\"more\":true,\"reason\":\"Payment fields are on the next screen, so we fill the required Phone field and click Continue to payment to reach them.\"}",
+  "usage": {
+    "input": 1509,
+    "output": 581
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T07:23:43.046Z"
+}

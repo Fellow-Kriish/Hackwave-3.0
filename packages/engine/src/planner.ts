@@ -13,7 +13,7 @@ import {
 import type { Page } from 'playwright';
 import { z } from 'zod';
 import type { LlmAdapter, PromptFile } from './llm';
-import { namePattern } from './resolve';
+import { describeStep, stepIssues } from './step-rules';
 import { screenTree, valueOwnersOf } from './tree';
 
 /** Steps written for one milestone on one screen; more means it continues on a later screen. */
@@ -30,8 +30,9 @@ export interface PlanSource {
    * Steps for pending[0] and for each following milestone that can be done on this same screen.
    * pending[0] may already have steps (it was marked more); the new steps continue it.
    * commit is the terminal milestone's committing step when it is already known.
+   * later lists the milestones after pending that already have steps: the model must not write their steps.
    */
-  expand(page: Page, pending: Milestone[], done: Step[], commit: Step | null): Promise<Map<string, Expansion>>;
+  expand(page: Page, pending: Milestone[], done: Step[], commit: Step | null, later?: Milestone[]): Promise<Map<string, Expansion>>;
 }
 
 export interface PlannerOptions {
@@ -53,22 +54,9 @@ export function planPromptHash(prompts: { plan: PromptFile; expand: PromptFile }
   return sha256(`${prompts.plan.hash}\n${prompts.expand.hash}`);
 }
 
-const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-/** Is there a node with this role and (exact or {n}-templated) name in the pruned tree? */
-function onScreen(screen: string, role: string, name: string): boolean {
-  const pattern = new RegExp(`^\\s*- ${escapeRegExp(role)} "${namePattern(name).source.slice(1, -1)}"`, 'm');
-  return pattern.test(screen);
-}
-
-function describeStep(step: Step): string {
-  if (step.action === 'navigate') return `navigate ${step.path}`;
-  const target = step.target;
-  if (!target) return `${step.action} ${step.action === 'press' ? step.pressKey : ''}`.trim();
-  const name = target.name ?? `{${target.nameRef ?? ''}}`;
-  const within = target.within ? ` in ${target.within.role} "${target.within.name ?? `{${target.within.nameRef ?? ''}}`}"` : '';
-  const input = step.action === 'fill' || step.action === 'select' ? ` <- ${step.inputRef}` : '';
-  return `${step.action} ${target.role} "${name}"${within}${input}`;
+/** "- key (terminal): description", as prompts list milestones that are not the model's to write. */
+export function milestoneLine(milestone: Milestone): string {
+  return `- ${milestone.key}${milestone.terminal ? ' (terminal)' : ''}: ${milestone.description}`;
 }
 
 export function createPlanner(options: PlannerOptions): PlanSource {
@@ -109,9 +97,9 @@ export function createPlanner(options: PlannerOptions): PlanSource {
       return parsePlan({ ...base, milestones: draft.milestones.map((milestone) => ({ ...milestone, steps: [] })) }, 'planner output');
     },
 
-    async expand(page, pending, done, commit) {
+    async expand(page, pending, done, commit, later = []) {
       const { path, tree } = await screenOf(page);
-      const known = new Set(inputKeys);
+      const rules = { screen: tree.text, inputKeys, valueOwners };
       const taken = new Set(done.map((step) => step.key));
       const schema = z
         .strictObject({
@@ -143,33 +131,7 @@ export function createPlanner(options: PlannerOptions): PlanSource {
             if (milestone.milestone !== expected.key) {
               issue(['milestones', index, 'milestone'], `must be "${expected.key}" (a milestone key from the list, not a step key): expand milestones in the order given`);
             }
-            milestone.steps.forEach((step, stepIndex) => {
-              const at = ['milestones', index, 'steps', stepIndex];
-              if (seen.has(step.key)) issue([...at, 'key'], `step key "${step.key}" is already used`);
-              seen.add(step.key);
-              if ((step.action === 'fill' || step.action === 'select') && !known.has(step.inputRef)) {
-                issue([...at, 'inputRef'], `"${step.inputRef}" is not an input key; use one of ${inputKeys.join(', ')}`);
-              }
-              if (!('target' in step) || !step.target) return;
-              for (const ref of [step.target.nameRef, step.target.within?.nameRef]) {
-                if (ref !== undefined && !known.has(ref)) issue([...at, 'target'], `"${ref}" is not an input key`);
-              }
-              // Plans reference inputs by key, never by value, so a cached plan works for any value of that input.
-              for (const [where, name] of [
-                ['target', step.target.name],
-                ['target.within', step.target.within?.name],
-              ] as const) {
-                const owner = name === undefined ? undefined : valueOwners.get(name.trim().toLowerCase());
-                if (owner) issue([...at, ...where.split('.')], `"${name}" is the value of input ${owner}; write "nameRef":"${owner}" instead of "name"`);
-              }
-              if (step.target.name !== undefined && !onScreen(tree.text, step.target.role, step.target.name)) {
-                issue([...at, 'target'], `there is no ${step.target.role} "${step.target.name}" on this screen; copy role and name exactly from the tree, writing a changing count as {n}`);
-              }
-              const within = step.target.within;
-              if (within?.name !== undefined && !onScreen(tree.text, within.role, within.name)) {
-                issue([...at, 'target', 'within'], `there is no ${within.role} "${within.name}" on this screen`);
-              }
-            });
+            for (const found of stepIssues(milestone.steps, rules, seen)) issue(['milestones', index, 'steps', ...found.path], found.message);
             // Empty steps close a milestone with nothing left to do: a started one, or one whose work a later
             // milestone in this same reply covers. Never the terminal one, and never to skip a screen not seen yet.
             if (milestone.steps.length === 0) {
@@ -181,11 +143,6 @@ export function createPlanner(options: PlannerOptions): PlanSource {
                 issue(['milestones', index, 'steps'], 'steps must not be empty here; close a milestone with "steps": [] only when a later milestone in this reply has steps');
               }
             }
-            milestone.steps.forEach((step, stepIndex) => {
-              if (step.action === 'press' && step.pressKey === 'Enter' && step.target?.role === 'textbox') {
-                issue(['milestones', index, 'steps', stepIndex], 'never press Enter in a text field: it submits the form; click the form\'s button instead');
-              }
-            });
             const lastStep = milestone.steps[milestone.steps.length - 1];
             if (milestone.more && lastStep && lastStep.action !== 'click' && lastStep.action !== 'press') {
               issue(['milestones', index, 'more'], '"more": true is only for a milestone whose last step leaves this screen (a click); finish everything this screen allows in this reply');
@@ -208,6 +165,8 @@ export function createPlanner(options: PlannerOptions): PlanSource {
           (milestone, index) =>
             `${index + 1}. ${milestone.key}${milestone.terminal ? ' (terminal)' : ''}${milestone.steps.length > 0 ? ' (started)' : ''}: ${milestone.description}`,
         ),
+        // Only when there are any, so plans expanded front to back keep their exact prompt (and recorded replies).
+        ...(later.length > 0 ? ['LATER MILESTONES (already planned; never write their steps here):', ...later.map(milestoneLine)] : []),
         'STEPS ALREADY DONE:',
         ...(done.length > 0 ? done.map((step) => `- ${step.key}: ${describeStep(step)}`) : ['(none)']),
         `REPLY WITH THESE MILESTONE KEYS, IN THIS ORDER, STARTING WITH THE FIRST (a prefix of the list): ${pending.map((milestone) => milestone.key).join(', ')}`,

@@ -19,6 +19,14 @@ export const CachedLocatorSchema = z
   .refine(exactlyOne, 'a cached locator needs exactly one of name and nameRef');
 export type CachedLocator = z.infer<typeof CachedLocatorSchema>;
 
+type NamedBox = { role: string; name?: string | undefined; nameRef?: string | undefined };
+
+/** Does a cached locator name the same element as a plan target (role, name or nameRef, and scope)? */
+export function sameLocator(cached: CachedLocator, target: NamedBox & { within?: NamedBox | undefined }): boolean {
+  const box = (named: NamedBox | undefined) => (named ? `${named.role}|${named.name ?? ''}|${named.nameRef ?? ''}` : '');
+  return box(cached) === box(target) && box(cached.within) === box(target.within);
+}
+
 const FingerprintSchema = z.strictObject({
   role: RoleSchema,
   name: z.string(),

@@ -35,14 +35,28 @@ export function savePlanCache(root: string, plan: Plan): string {
   return file;
 }
 
-/** Steps expanded this run are cached only once their milestone ran through; the rest go back to empty. */
-export function cacheablePlan(plan: Plan, expandedThisRun: readonly string[], completed: readonly string[]): Plan {
+/**
+ * Steps written this run (expanded or re-planned) are cached only once their milestone ran through. The rest go
+ * back: a re-planned milestone to its steps as loaded (original), an expanded one to empty.
+ */
+export function cacheablePlan(
+  plan: Plan,
+  expandedThisRun: readonly string[],
+  completed: readonly string[],
+  replanned: { keys: readonly string[]; original: Plan | null } = { keys: [], original: null },
+): Plan {
   const keep = new Set(completed);
   const expanded = new Set(expandedThisRun);
+  const rewritten = new Set(replanned.keys);
   return {
     ...plan,
     milestones: plan.milestones.map((milestone) => {
-      if (!expanded.has(milestone.key) || keep.has(milestone.key)) return milestone;
+      if (keep.has(milestone.key)) return milestone;
+      if (rewritten.has(milestone.key)) {
+        const before = replanned.original?.milestones.find((candidate) => candidate.key === milestone.key);
+        if (before) return before;
+      }
+      if (!expanded.has(milestone.key) && !rewritten.has(milestone.key)) return milestone;
       const { expanded: _expanded, ...rest } = milestone;
       return { ...rest, steps: [] };
     }),

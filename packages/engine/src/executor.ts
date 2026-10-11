@@ -10,6 +10,7 @@ import {
   type Milestone,
   type Plan,
   type Reason,
+  type ReplanEvent,
   type RunOutcome,
   type RungHistogram,
   type Step,
@@ -23,14 +24,16 @@ import type { EngineConfig } from './config';
 import type { EventLog } from './events';
 import { accessibleName } from './fingerprint';
 import { concreteFromCached, createLadder, describeLandmark, expectationFor, type Expectation, type RungOutcome, type ScoredCandidate } from './ladder';
-import type { LocatorCache } from './locator-cache';
+import { sameLocator, type LocatorCache, type LocatorCacheEntry } from './locator-cache';
 import { OutcomeError } from './outcome';
 import type { PlanSource } from './planner';
+import type { Replanner } from './replanner';
 import type { Rung3Picker, Rung3Request } from './resolver';
 import { concreteTarget, describeTarget, type ConcreteTarget } from './resolve';
 import { settle, type SettleConfig } from './settle';
+import { describeStep } from './step-rules';
 import type { Timings } from './timing';
-import { valueOwnersOf } from './tree';
+import { redactValues, valueOwnersOf } from './tree';
 
 export interface ExecuteInput {
   page: Page;
@@ -39,7 +42,10 @@ export interface ExecuteInput {
   startUrl: string;
   /** A hand-written or cached plan, or null to have the planner write one from the landing screen. */
   plan: Plan | null;
-  /** Writes the plan and expands milestones that have no steps yet. Absent for hand-written plans. */
+  /**
+   * Writes the plan when there is none and expands milestones that have no steps yet, or that a re-plan left
+   * to continue on a later screen. Absent means the plan must be complete as given.
+   */
   planner?: PlanSource;
   /** Goal and input keys only: everything the healer is allowed to know. */
   healer: HealerIntent;
@@ -52,6 +58,8 @@ export interface ExecuteInput {
   locators: LocatorCache;
   /** Rung 3. Absent means the ladder stops at rung 2. */
   picker?: Rung3Picker;
+  /** Rung 5: milestone re-plan. Absent means a step no rung resolves stops the run. */
+  replanner?: Replanner;
   runId: string;
   events: EventLog;
   timings: Timings;
@@ -76,16 +84,42 @@ export interface ExecutionResult {
   heals: HealEvent[];
   /** Runs whose earlier heals this run reused on rung 1. */
   reusedHealsFrom: string[];
-  /** The plan as executed, expansions included. */
+  /** Rung-5 milestone re-plans, in order. */
+  replans: ReplanEvent[];
+  /** The plan as executed, expansions and re-plans included. */
   plan: Plan | null;
   /** Milestones whose steps were written during this run. */
   expanded: string[];
-  /** Milestones whose steps all ran through. */
+  /** Milestones whose remaining steps a re-plan rewrote during this run. */
+  replanned: string[];
+  /** Milestones whose steps all ran through, or whose completion already held when they came up. */
   completed: string[];
 }
 
 /** A milestone marked "more" is expanded again on each new screen, at most this many times. */
 const MAX_REEXPANSIONS_PER_MILESTONE = 3;
+
+/**
+ * Thrown by a step that no rung resolved, or whose action changed nothing: the milestone goes to rung 5.
+ * code and message are the run's reason if it cannot be re-planned.
+ */
+class ReplanNeeded extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly failures: string[],
+  ) {
+    super(message);
+  }
+}
+
+/** The same targets in the same order: a re-plan that changes nothing. */
+function sameSteps(a: readonly Step[], b: readonly Step[]): boolean {
+  return a.length === b.length && a.every((step, index) => {
+    const other = b[index];
+    return other !== undefined && step.action === other.action && sameTarget(step, other);
+  });
+}
 
 /** Connection-level failures only; aborted requests (navigation) and our own blocks are not environment errors. */
 const CONNECTION_ERROR =
@@ -126,6 +160,10 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
   const reusedHealsFrom = new Set<string>();
   const expanded: string[] = [];
   const completed: string[] = [];
+  /** Milestones finished (ran through or already satisfied): the next one needs all its dependencies here. */
+  const done = new Set<string>();
+  const replans: ReplanEvent[] = [];
+  const replanned: string[] = [];
   const doneSteps: Step[] = [];
   /** Milestones whose expansion said "more": they continue on a later screen. */
   const needsMore = new Set<string>();
@@ -134,6 +172,10 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
   const rung3Attempts = new Map<string, number>();
   /** Rung-3 answers for later steps of a batch, kept for when the run reaches them on the same screen. */
   const preResolved = new Map<string, { screen: string; outcome: RungOutcome }>();
+  /** Rung-5 re-plans per milestone, against budgets.maxReplansPerMilestone. */
+  const replanCount = new Map<string, number>();
+  /** Keys of steps written on this run's live screens, by expansion or re-plan. */
+  const writtenThisRun = new Set<string>();
   let plan: Plan | null = input.plan ? structuredClone(input.plan) : null;
   let actions = 0;
   let lastStepKey: string | null = null;
@@ -162,8 +204,10 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     environmentErrors,
     heals,
     reusedHealsFrom: [...reusedHealsFrom],
+    replans,
     plan,
     expanded,
+    replanned,
     completed,
   });
   // A copy: the executor may still be unwinding when the watchdog reads it.
@@ -189,8 +233,38 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     return `${new URL(page.url()).pathname}|${dialogs.sort().join(',')}`;
   }
 
-  const purposeOf = (step: Step, milestone: Milestone): string =>
-    ('target' in step && step.target?.hint) || `${step.action} in milestone ${milestone.key}: ${milestone.description}`;
+  /**
+   * What a step is for, for rung 3: its hint. Without one, the step's own planned element and the step before it,
+   * with the milestone only as context: a milestone description alone ("add it to the cart and open the cart")
+   * can point the model at the wrong half of the milestone.
+   */
+  const purposeOf = (step: Step, milestone: Milestone): string => {
+    if ('target' in step && step.target?.hint) return step.target.hint;
+    const index = milestone.steps.indexOf(step);
+    const previous = index > 0 ? milestone.steps[index - 1] : doneSteps[doneSteps.length - 1];
+    const after = previous ? `, right after ${previous.key} (${describeStep(previous)})` : '';
+    return `${describeStep(step)}${after}; part of milestone ${milestone.key}: ${milestone.description}`;
+  };
+
+  /** Targets acted on since the page last navigated: rungs 2 and 3 never heal onto them. */
+  const acted = { url: '', targets: [] as ConcreteTarget[] };
+  const actedHere = (): ConcreteTarget[] => {
+    if (page.url() !== acted.url) {
+      acted.url = page.url();
+      acted.targets = [];
+    }
+    return acted.targets;
+  };
+
+  /**
+   * The cache entry rung 1 starts from. A step written on this run's live screen (expansion or re-plan) already
+   * names its element; an entry cached for an older step with the same key and another target does not apply.
+   */
+  const cacheEntryFor = (step: Step): LocatorCacheEntry | undefined => {
+    const entry = locators.get(step.key);
+    if (!entry || !writtenThisRun.has(step.key) || !('target' in step) || !step.target) return entry;
+    return sameLocator(entry.locator, step.target) ? entry : undefined;
+  };
 
   const failed = (reason: string): RungOutcome => ({
     ok: false,
@@ -225,10 +299,10 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
 
     const batch: Rung3Request[] = [{ expectation, purpose: purposeOf(step, milestone), candidates }];
     for (const later of milestone.steps.slice(index + 1)) {
-      const laterExpectation = expectationFor(later, locators.get(later.key), inputs);
+      const laterExpectation = expectationFor(later, cacheEntryFor(later), inputs);
       if (!laterExpectation || preResolved.has(later.key) || attempts(later.key) >= budgets.maxRung3AttemptsPerStepPerScreen) continue;
       if ((await ladder.rung1(laterExpectation, 0)).ok) continue;
-      const laterRung2 = await ladder.rung2(laterExpectation);
+      const laterRung2 = await ladder.rung2(laterExpectation, actedHere());
       if (laterRung2.ok || laterRung2.candidates.length === 0) continue;
       batch.push({ expectation: laterExpectation, purpose: purposeOf(later, milestone), candidates: laterRung2.candidates });
     }
@@ -248,22 +322,24 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     return own;
   }
 
-  /** Resolution ladder: rung 1, then rung 2, then rung 3. Rung 5 (milestone re-plan) arrives in P4. */
+  /**
+   * Resolution ladder: rung 1, then rung 2, then rung 3. A step none of them resolves goes to rung 5 (the
+   * milestone re-plan) in the milestone loop. Heals never land on an element already acted on, on this screen.
+   */
   async function resolveTarget(milestone: Milestone, index: number, step: Step, escalateFrom: ConcreteTarget | null = null): Promise<Resolution> {
-    const expectation = expectationFor(step, locators.get(step.key), inputs);
+    const expectation = expectationFor(step, cacheEntryFor(step), inputs);
     if (!expectation) throw new OutcomeError('unresolvable', 'no_target', `${step.key} has no target to resolve`);
     const failures: string[] = [];
     if (escalateFrom) {
       // A rung-2 heal acted but changed nothing: go one rung up, without the element that failed.
       failures.push(`rung 2: ${describeTarget(escalateFrom)} acted without effect`);
-      const { candidates } = await ladder.candidatesFor(expectation);
-      const others = candidates.filter((candidate) => candidate.name !== escalateFrom.name);
-      return { outcome: await rung3(milestone, index, step, expectation, others), expectation, failures };
+      const { candidates } = await ladder.candidatesFor(expectation, [...actedHere(), escalateFrom]);
+      return { outcome: await rung3(milestone, index, step, expectation, candidates), expectation, failures };
     }
     const first = await ladder.rung1(expectation, Math.min(2000, stepBudget()));
     if (first.ok) return { outcome: first, expectation, failures };
     failures.push(`rung 1: ${first.reason}`);
-    const second = await ladder.rung2(expectation);
+    const second = await ladder.rung2(expectation, actedHere());
     if (second.ok) return { outcome: second, expectation, failures };
     failures.push(`rung 2: ${second.reason}`);
     if (expectation.scope?.required && second.candidates.length === 0) return { outcome: failed('nothing to ask: the required scope is missing'), expectation, failures };
@@ -341,7 +417,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       const target = describeTarget(found.expectation.target);
       if (!found.outcome.ok || !found.outcome.target) {
         events.emit('unresolved', { milestoneKey: milestone.key, stepKey: step.key, target, failures: found.failures });
-        throw new OutcomeError('unresolvable', 'unresolved', `${step.key}: no rung could resolve ${target} (${found.failures.join('; ')}); milestone re-planning (rung 5) arrives in P4`);
+        throw new ReplanNeeded('unresolved', `${step.key}: no rung could resolve ${target} (${found.failures.join('; ')})`, found.failures);
       }
       rungHistogram[String(found.outcome.rung) as '1' | '2' | '3']++;
       events.emit('resolved', {
@@ -370,7 +446,9 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       }
       actions++;
       const actionStarted = performance.now();
+      const actedOnThisScreen = actedHere();
       await perform(page, step, locator, value, origin, stepBudget());
+      if (resolution?.outcome.target) actedOnThisScreen.push(resolution.outcome.target);
       if (attempt === 1) doneSteps.push(step);
       events.emit('action', {
         milestoneKey: milestone.key,
@@ -400,7 +478,9 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
 
       const nextStep = milestone.steps[index + 1];
       const nextTarget: ConcreteTarget | null = nextStep && 'target' in nextStep && nextStep.target ? concreteTarget(nextStep.target, inputs) : null;
-      const progress = await checkProgress({ page, step, locator, value, before, after, nextTarget });
+      const checked = await checkProgress({ page, step, locator, value, before, after, nextTarget });
+      // The detail can quote the page (an alert); input values never reach the log.
+      const progress = { ...checked, detail: redactValues(checked.detail, valueOwners) };
       events.emit('progress', { stepKey: step.key, ok: progress.ok, detail: progress.detail });
       if (progress.ok) {
         if (resolution) commit(milestone, step, resolution);
@@ -423,7 +503,8 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
           continue;
         }
       }
-      throw new OutcomeError('unresolvable', 'no_progress', `${step.key}: ${progress.detail}`);
+      // The page wants something the plan does not do (a new required field, a changed flow): rung 5.
+      throw new ReplanNeeded('no_progress', `${step.key}: ${progress.detail}`, [`${step.action} ${target || step.key} had no effect: ${progress.detail}`]);
     }
   }
 
@@ -431,7 +512,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
    * Steps for this milestone and the next ones on the same screen, written by the planner on the live page.
    * When continuing, the milestone already has steps and the new ones are appended.
    */
-  async function expandFrom(current: Plan, milestone: Milestone, done: Set<string>, continuing: boolean): Promise<void> {
+  async function expandFrom(current: Plan, milestone: Milestone, continuing: boolean): Promise<void> {
     if (!planner) throw new OutcomeError('unresolvable', 'plan_incomplete', `milestone ${milestone.key} has no steps and there is no planner`);
     const start = current.milestones.indexOf(milestone);
     const pending: Milestone[] = continuing ? [milestone] : [];
@@ -439,10 +520,13 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       if (done.has(candidate.key) || isExpanded(candidate)) break;
       pending.push(candidate);
     }
-    const written = await planner.expand(page, pending, doneSteps, committingStep());
+    // Milestones still ahead that already have steps: the model is told they are not its to write.
+    const later = current.milestones.filter((candidate) => !done.has(candidate.key) && !pending.includes(candidate));
+    const written = await planner.expand(page, pending, doneSteps, committingStep(), later);
     for (const candidate of pending) {
       const expansion = written.get(candidate.key);
       if (!expansion) continue;
+      for (const step of expansion.steps) writtenThisRun.add(step.key);
       candidate.steps = candidate === milestone && continuing ? [...candidate.steps, ...expansion.steps] : expansion.steps;
       candidate.expanded = true;
       if (expansion.more) needsMore.add(candidate.key);
@@ -456,6 +540,113 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       path: new URL(page.url()).pathname,
     });
     state = await settleNow(`after expanding ${milestone.key}`);
+  }
+
+  /**
+   * Skip-if-satisfied, for milestones with known steps and never the terminal one. "filled" holds only when its
+   * fields already carry their inputs. A heading, url or visible condition can hold before the milestone ran
+   * (a heading on the start page), so it skips only when the milestone's first step is not on this screen either.
+   */
+  async function alreadySatisfied(milestone: Milestone): Promise<string | null> {
+    if (milestone.terminal || milestone.steps.length === 0) return null;
+    if (milestone.completion.kind === 'filled' && !milestone.steps.some((step) => step.action === 'fill')) return null;
+    const check = await completionHolds(page, milestone, inputs);
+    if (!check.holds) return null;
+    if (milestone.completion.kind !== 'filled' && (await opensHere(milestone))) return null;
+    return check.detail;
+  }
+
+  /** Is the milestone's first step on this screen? Rungs 1 and 2 only: choosing an order never costs a model call. */
+  async function opensHere(milestone: Milestone): Promise<boolean> {
+    const step = milestone.steps[0];
+    if (!step) return false;
+    const expectation = expectationFor(step, cacheEntryFor(step), inputs);
+    if (!expectation) return false;
+    return (await ladder.rung1(expectation, 0)).ok || (await ladder.rung2(expectation, actedHere())).ok;
+  }
+
+  /**
+   * Adaptive order: of the milestones whose dependencies are done, any whose completion already holds is
+   * skipped; then the first whose opening step is on this screen goes next, so a reordered flow needs no
+   * re-plan. When none is, plan order.
+   */
+  async function nextMilestone(current: Plan): Promise<Milestone | null> {
+    for (;;) {
+      const ready = current.milestones.filter((m) => !done.has(m.key) && m.dependsOn.every((dependency) => done.has(dependency)));
+      const first = ready[0];
+      if (!first) return null;
+      let skipped = false;
+      for (const milestone of ready) {
+        const detail = await alreadySatisfied(milestone);
+        if (detail === null) continue;
+        events.emit('milestone_skipped', { milestoneKey: milestone.key, detail });
+        completed.push(milestone.key);
+        done.add(milestone.key);
+        skipped = true;
+      }
+      // A skip can make other milestones ready.
+      if (skipped) continue;
+      if (ready.length === 1) return first;
+      for (const candidate of ready) {
+        if (!(await opensHere(candidate))) continue;
+        if (candidate !== first) {
+          events.emit('milestone_reordered', { milestoneKey: candidate.key, instead: first.key, detail: `${candidate.key} starts on this screen; ${first.key} does not` });
+        }
+        return candidate;
+      }
+      return first;
+    }
+  }
+
+  /**
+   * Rung 5: the strong model rewrites the rest of this milestone from the current screen, within the re-plan
+   * budget. A re-plan that retries the failed step first, or repeats the old steps, is a loop and stops the run.
+   */
+  async function replanMilestone(current: Plan, milestone: Milestone, index: number, need: ReplanNeeded): Promise<void> {
+    const failed = milestone.steps[index];
+    const stop = (code: string, why: string) => new OutcomeError('unresolvable', code, `${need.message}; ${why}`);
+    if (!failed) throw stop(need.code, 'there is no step to re-plan from');
+    if (!input.replanner) throw stop(need.code, 'no re-planner (rung 5) is available');
+    const maxAttempts = budgets.maxReplansPerMilestone;
+    const attempt = (replanCount.get(milestone.key) ?? 0) + 1;
+    if (attempt > maxAttempts) throw stop('replan_budget_exhausted', `milestone ${milestone.key} was already re-planned ${maxAttempts} time(s); refused to guess`);
+    replanCount.set(milestone.key, attempt);
+    // An action that changed nothing is not a step done, as far as the plan is concerned.
+    if (doneSteps[doneSteps.length - 1] === failed) doneSteps.pop();
+    events.emit('replan_started', { milestoneKey: milestone.key, stepKey: failed.key, attempt, maxAttempts });
+
+    const oldSteps = milestone.steps.slice(index);
+    const others = current.milestones.filter((other) => other !== milestone);
+    const result = await input.replanner.replan(page, {
+      milestone,
+      index,
+      failures: need.failures,
+      done: doneSteps,
+      attempt,
+      maxAttempts,
+      previous: replans.filter((event) => event.milestoneKey === milestone.key),
+      later: others.filter((other) => !done.has(other.key)),
+      commit: milestone.terminal ? null : committingStep(),
+      taken: new Set([...doneSteps.map((step) => step.key), ...others.flatMap((other) => other.steps.map((step) => step.key))]),
+    });
+    if (result.steps.length === 0) throw stop('replan_impossible', `rung 5 found no way to carry milestone ${milestone.key} on: ${result.reason}`);
+    const first = result.steps[0];
+    if ((first && first.action === failed.action && sameTarget(first, failed)) || sameSteps(result.steps, oldSteps)) {
+      throw stop('replan_loop', `the re-plan for ${milestone.key} starts with the step that just failed (${describeStep(failed)}); refused to loop`);
+    }
+
+    milestone.steps = [...milestone.steps.slice(0, index), ...result.steps];
+    milestone.expanded = true;
+    for (const step of result.steps) writtenThisRun.add(step.key);
+    if (result.more) needsMore.add(milestone.key);
+    else needsMore.delete(milestone.key);
+    // Rung-3 answers kept for the replaced steps no longer apply.
+    for (const step of oldSteps) preResolved.delete(step.key);
+    rungHistogram['5']++;
+    const event: ReplanEvent = { milestoneKey: milestone.key, reason: need.failures.join('; ') || need.message, oldSteps, newSteps: result.steps, attempt };
+    replans.push(event);
+    if (!replanned.includes(milestone.key)) replanned.push(milestone.key);
+    events.emit('replanned', { ...event, maxAttempts, more: result.more, why: result.reason, added: result.steps.map(describeStep) });
   }
 
   try {
@@ -473,13 +664,12 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       });
     }
     const current = plan;
-    const done = new Set<string>();
 
     for (;;) {
-      const milestone = current.milestones.find((m) => !done.has(m.key) && m.dependsOn.every((dependency) => done.has(dependency)));
+      const milestone = await nextMilestone(current);
       if (!milestone) break;
       events.emit('milestone_started', { milestoneKey: milestone.key, description: milestone.description, terminal: milestone.terminal });
-      if (!isExpanded(milestone)) await expandFrom(current, milestone, done, false);
+      if (!isExpanded(milestone)) await expandFrom(current, milestone, false);
 
       for (let index = 0; ; index++) {
         if (index >= milestone.steps.length) {
@@ -490,12 +680,20 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
             throw new OutcomeError('unresolvable', 'expansion_loop', `milestone ${milestone.key} still needed more steps after ${MAX_REEXPANSIONS_PER_MILESTONE} screens`);
           }
           reexpansions.set(milestone.key, count);
-          await expandFrom(current, milestone, done, true);
+          await expandFrom(current, milestone, true);
         }
         const step = milestone.steps[index];
         if (!step) break;
         lastStepKey = step.key;
-        const reachedTerminal = await timings.measure('browser', step.key, () => runStep(milestone, index, step));
+        let reachedTerminal: boolean;
+        try {
+          reachedTerminal = await timings.measure('browser', step.key, () => runStep(milestone, index, step));
+        } catch (error) {
+          if (!(error instanceof ReplanNeeded)) throw error;
+          await replanMilestone(current, milestone, index, error);
+          index--; // the re-planned steps start where the failed one stood
+          continue;
+        }
         if (reachedTerminal) {
           completed.push(milestone.key);
           return finish('completed', null);
