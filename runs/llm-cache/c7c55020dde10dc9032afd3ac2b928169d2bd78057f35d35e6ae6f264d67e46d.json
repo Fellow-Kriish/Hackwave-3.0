@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "c7c55020dde10dc9032afd3ac2b928169d2bd78057f35d35e6ae6f264d67e46d",
+  "stage": "expand",
+  "prompt": "expand",
+  "promptVersion": "expand/11",
+  "promptHash": "77e37049dca1e32823c50d3ffadace758f83a5f46698a8112f48095f29d2c1cc",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "009d9d79b7aaef6e9a96732f3f30df1c2aaf8ad825bcd500eb830f1888266bbe",
+  "text": "{\"milestones\":[{\"milestone\":\"checkout\",\"steps\":[],\"more\":false},{\"milestone\":\"shipping\",\"steps\":[{\"key\":\"shipping.name\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Full name\"},\"inputRef\":\"shipping.name\"},{\"key\":\"shipping.street\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Street address\"},\"inputRef\":\"shipping.street\"},{\"key\":\"shipping.city\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"City\"},\"inputRef\":\"shipping.city\"},{\"key\":\"shipping.pincode\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Pincode\"},\"inputRef\":\"shipping.pincode\"}],\"more\":false},{\"milestone\":\"payment\",\"steps\":[{\"key\":\"payment.card-number\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Card number\"},\"inputRef\":\"card.number\"},{\"key\":\"payment.expiry\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Expiry (MM/YY)\"},\"inputRef\":\"card.expiry\"},{\"key\":\"payment.cvv\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"CVV\"},\"inputRef\":\"card.cvv\"},{\"key\":\"payment.name\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Name on card\"},\"inputRef\":\"card.name\"}],\"more\":false},{\"milestone\":\"place-order\",\"steps\":[{\"key\":\"place-order.submit\",\"action\":\"click\",\"target\":{\"role\":\"button\",\"name\":\"Place order\"}}],\"more\":false}]}",
+  "usage": {
+    "input": 1545,
+    "output": 1239
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T03:48:31.467Z"
+}

@@ -1,6 +1,8 @@
 import { performance } from 'node:perf_hooks';
 import {
   emptyRungHistogram,
+  isExpanded,
+  sameTarget,
   type Budgets,
   type HealerDone,
   type HealerIntent,
@@ -139,6 +141,13 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     return result.state;
   };
 
+  /** The terminal milestone's committing step, once it is known. */
+  function committingStep(): Step | null {
+    const terminal = plan?.milestones.find((milestone) => milestone.terminal);
+    if (!terminal || !isExpanded(terminal) || needsMore.has(terminal.key)) return null;
+    return terminal.steps[terminal.steps.length - 1] ?? null;
+  }
+
   /** One step: resolve, act, settle, check progress. Returns true once the terminal action has run. */
   async function runStep(milestone: Milestone, index: number, step: Step): Promise<boolean> {
     // The terminal action is the last step of the terminal milestone once it is fully expanded.
@@ -150,6 +159,13 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     if (!allowed.ok) {
       events.emit('refused', { milestoneKey: milestone.key, stepKey: step.key, message: allowed.message });
       throw new OutcomeError('refused', allowed.code, allowed.message);
+    }
+    // Terminal rule: the committing click runs only as the terminal milestone's last step, never from elsewhere.
+    const commit = committingStep();
+    if (!milestone.terminal && commit && sameTarget(step, commit)) {
+      const message = `${step.key} would perform the committing action (${commit.key}) outside the terminal milestone`;
+      events.emit('refused', { milestoneKey: milestone.key, stepKey: step.key, message });
+      throw new OutcomeError('refused', 'commit_outside_terminal', message);
     }
 
     let locator: Locator | null = null;
@@ -245,14 +261,15 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     const start = current.milestones.indexOf(milestone);
     const pending: Milestone[] = continuing ? [milestone] : [];
     for (const candidate of current.milestones.slice(continuing ? start + 1 : start)) {
-      if (done.has(candidate.key) || candidate.steps.length > 0) break;
+      if (done.has(candidate.key) || isExpanded(candidate)) break;
       pending.push(candidate);
     }
-    const written = await planner.expand(page, pending, doneSteps);
+    const written = await planner.expand(page, pending, doneSteps, committingStep());
     for (const candidate of pending) {
       const expansion = written.get(candidate.key);
       if (!expansion) continue;
       candidate.steps = candidate === milestone && continuing ? [...candidate.steps, ...expansion.steps] : expansion.steps;
+      candidate.expanded = true;
       if (expansion.more) needsMore.add(candidate.key);
       else needsMore.delete(candidate.key);
       if (!expanded.includes(candidate.key)) expanded.push(candidate.key);
@@ -287,7 +304,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       const milestone = current.milestones.find((m) => !done.has(m.key) && m.dependsOn.every((dependency) => done.has(dependency)));
       if (!milestone) break;
       events.emit('milestone_started', { milestoneKey: milestone.key, description: milestone.description, terminal: milestone.terminal });
-      if (milestone.steps.length === 0) await expandFrom(current, milestone, done, false);
+      if (!isExpanded(milestone)) await expandFrom(current, milestone, done, false);
 
       for (let index = 0; ; index++) {
         if (index >= milestone.steps.length) {

@@ -41,8 +41,10 @@ export function cacheablePlan(plan: Plan, expandedThisRun: readonly string[], co
   const expanded = new Set(expandedThisRun);
   return {
     ...plan,
-    milestones: plan.milestones.map((milestone) =>
-      expanded.has(milestone.key) && !keep.has(milestone.key) ? { ...milestone, steps: [] } : milestone,
-    ),
+    milestones: plan.milestones.map((milestone) => {
+      if (!expanded.has(milestone.key) || keep.has(milestone.key)) return milestone;
+      const { expanded: _expanded, ...rest } = milestone;
+      return { ...rest, steps: [] };
+    }),
   };
 }

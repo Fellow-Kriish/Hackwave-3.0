@@ -177,8 +177,8 @@ describe('adapter', () => {
     expect(calls).toHaveLength(2);
     const retry = (calls[1]?.body.messages as { content: string }[])[1]?.content ?? '';
     expect(retry).toContain('question');
-    expect(retry).toContain('YOUR PREVIOUS REPLY COULD NOT BE USED');
-    expect(retry).toContain('the reply contains no JSON object');
+    expect(retry).toContain('YOUR PREVIOUS REPLY:\nnot json at all');
+    expect(retry).toContain('IT COULD NOT BE USED BECAUSE:\nthe reply contains no JSON object');
   });
 
   it('accepts a corrected reply on the retry', async () => {

@@ -14,8 +14,13 @@ export async function completionHolds(page: Page, milestone: Milestone, inputs: 
   const { completion } = milestone;
   switch (completion.kind) {
     case 'heading': {
-      const holds = (await page.getByRole('heading', { name: completion.text }).filter({ visible: true }).count()) > 0;
-      return { holds, detail: `heading containing "${completion.text}" ${holds ? 'is visible' : 'is not visible'}` };
+      const texts = Array.isArray(completion.text) ? completion.text : [completion.text];
+      for (const text of texts) {
+        if ((await page.getByRole('heading', { name: text }).filter({ visible: true }).count()) > 0) {
+          return { holds: true, detail: `heading containing "${text}" is visible` };
+        }
+      }
+      return { holds: false, detail: `no heading containing ${texts.map((text) => `"${text}"`).join(' or ')} is visible` };
     }
     case 'visible': {
       const holds = (await page.getByRole(completion.role as AriaRole, nameOption(completion.name)).filter({ visible: true }).count()) > 0;

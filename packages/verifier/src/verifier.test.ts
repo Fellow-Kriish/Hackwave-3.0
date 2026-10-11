@@ -211,7 +211,8 @@ describe('createVerifier against a real page', () => {
   });
 });
 
-describe('lint boundary', () => {
+// Starting ESLint and its TypeScript parser takes a few seconds, more on a busy machine.
+describe('lint boundary', { timeout: 30_000 }, () => {
   const eslint = new ESLint({ cwd: ROOT });
   const lint = async (code: string, file = 'packages/verifier/src/probe.ts') =>
     (await eslint.lintText(code, { filePath: join(ROOT, file) }))[0]?.messages.map((entry) => entry.ruleId) ?? [];
