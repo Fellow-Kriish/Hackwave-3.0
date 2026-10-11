@@ -23,8 +23,8 @@
         "href": null,
         "type": "button"
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:03.808Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:09.423Z",
       "rung": 1
     },
     "cart.open": {
@@ -43,8 +43,8 @@
         "href": null,
         "type": "button"
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:04.109Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:10.035Z",
       "rung": 1
     },
     "checkout.proceed": {
@@ -63,8 +63,8 @@
         "href": null,
         "type": "button"
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:04.414Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:10.683Z",
       "rung": 1
     },
     "payment.card-number": {
@@ -81,15 +81,15 @@
         },
         "siblingText": [
           "Payment",
-          "Card number",
           "Expiry (MM/YY)",
-          "CVV"
+          "CVV",
+          "Name on card"
         ],
         "href": null,
         "type": null
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:05.815Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:13.579Z",
       "rung": 1
     },
     "payment.cvv": {
@@ -108,13 +108,13 @@
           "Payment",
           "Card number",
           "Expiry (MM/YY)",
-          "CVV"
+          "Name on card"
         ],
         "href": null,
         "type": null
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:06.321Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:14.711Z",
       "rung": 1
     },
     "payment.expiry": {
@@ -132,14 +132,14 @@
         "siblingText": [
           "Payment",
           "Card number",
-          "Expiry (MM/YY)",
-          "CVV"
+          "CVV",
+          "Name on card"
         ],
         "href": null,
         "type": null
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:06.067Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:14.118Z",
       "rung": 1
     },
     "payment.name": {
@@ -163,8 +163,8 @@
         "href": null,
         "type": null
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:06.576Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:15.306Z",
       "rung": 1
     },
     "place-order.submit": {
@@ -188,8 +188,8 @@
         "href": null,
         "type": "submit"
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:06.911Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:15.929Z",
       "rung": 1
     },
     "shipping.city": {
@@ -208,13 +208,13 @@
           "Shipping",
           "Full name",
           "Street address",
-          "City"
+          "Pincode"
         ],
         "href": null,
         "type": null
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:05.235Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:12.402Z",
       "rung": 1
     },
     "shipping.name": {
@@ -231,15 +231,15 @@
         },
         "siblingText": [
           "Shipping",
-          "Full name",
           "Street address",
-          "City"
+          "City",
+          "Pincode"
         ],
         "href": null,
         "type": null
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:04.702Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:11.266Z",
       "rung": 1
     },
     "shipping.pincode": {
@@ -263,8 +263,8 @@
         "href": null,
         "type": null
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:05.505Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:12.961Z",
       "rung": 1
     },
     "shipping.street": {
@@ -282,14 +282,14 @@
         "siblingText": [
           "Shipping",
           "Full name",
-          "Street address",
-          "City"
+          "City",
+          "Pincode"
         ],
         "href": null,
         "type": null
       },
-      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
-      "updatedAt": "2026-10-11T05:16:04.968Z",
+      "updatedByRun": "20261011T102906Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T10:29:11.836Z",
       "rung": 1
     }
   }

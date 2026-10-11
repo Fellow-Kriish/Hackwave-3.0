@@ -39,7 +39,7 @@ export async function describeElement(locator: Locator, role: string): Promise<E
   const name = await accessibleName(locator);
   // No named helpers inside this callback: tsx compiles with esbuild's keepNames, which wraps every named
   // function in a __name() call that exists in Node but not in the page (lint enforces this).
-  const dom = await locator.evaluate((element) => {
+  const dom = await locator.evaluate((element, ownName) => {
     const LANDMARKS = ['banner', 'navigation', 'main', 'contentinfo', 'complementary', 'region', 'search', 'dialog', 'alertdialog', 'form'];
     const CONTAINERS = ['article', 'region', 'dialog', 'alertdialog', 'form', 'group', 'navigation', 'complementary', 'banner', 'main', 'contentinfo'];
     const IMPLICIT: Record<string, string> = { ARTICLE: 'article', NAV: 'navigation', MAIN: 'main', ASIDE: 'complementary', DIALOG: 'dialog', FIELDSET: 'group' };
@@ -77,18 +77,21 @@ export async function describeElement(locator: Locator, role: string): Promise<E
       }
       if (landmark && container) break;
     }
+    // The element's own text and its own label (a field's "Card number") say nothing about where it sits; only
+    // the headings and labels around it tell one field of a form from the next.
     const own = (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+    const ownLabel = ownName.replace(/\s+/g, ' ').trim().toLowerCase();
     const siblingText: string[] = [];
     const around = containerElement ?? element.closest('article, li, fieldset, form, section, [role="dialog"], [role="group"]');
     if (around) {
       for (const node of around.querySelectorAll('h1, h2, h3, h4, h5, h6, legend, label')) {
         const value = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
-        if (value && value !== own && value.length <= 80 && !siblingText.includes(value)) siblingText.push(value);
+        if (value && value !== own && value.toLowerCase() !== ownLabel && value.length <= 80 && !siblingText.includes(value)) siblingText.push(value);
         if (siblingText.length >= 4) break;
       }
     }
     return { landmark, container, siblingText, href: element.getAttribute('href'), type: element.getAttribute('type') };
-  });
+  }, name);
   return {
     fingerprint: { role, name, landmark: dom.landmark, siblingText: dom.siblingText, href: dom.href, type: dom.type },
     container: dom.container,

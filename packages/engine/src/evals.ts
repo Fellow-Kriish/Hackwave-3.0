@@ -259,7 +259,7 @@ async function runSelected(
     const started = Date.now();
     if (fixture.demo) {
       try {
-        const result = await runDemo({ headed: options.headed, slowMo: options.slowMo, video: false, cues: false, keepCaches: false, withWrongTotal: false, envOverride: NO_LLM_ENV, quiet: !options.verbose });
+        const result = await runDemo({ headed: options.headed, slowMo: options.slowMo, video: false, cues: false, keepCaches: false, withWrongTotal: false, sameUrl: false, envOverride: NO_LLM_ENV, quiet: !options.verbose });
         const problems = [...result.problems];
         if (fixture.maxSeconds !== undefined && result.ms > fixture.maxSeconds * 1000) problems.push(`took ${(result.ms / 1000).toFixed(0)} s, over ${fixture.maxSeconds} s`);
         const acts = result.acts.map((act) => `act ${act.act.act} ${act.verdict.color}`).join(', ');

@@ -4,8 +4,9 @@ import { dirname, join } from 'node:path';
 /** The caches a run learns from and rewrites: planned plans and committed locators. */
 const CACHE_DIRS = ['plans', 'locators'] as const;
 
-/** Hand-written plans heal into a scratch cache that is never committed, and never snapshotted. */
-const isCacheFile = (dir: string, file: string) => file.endsWith('.json') && !(dir === 'locators' && file.endsWith('.hand.json'));
+/** Hand-written plans and typed goals (`pnpm engine try`) use scratch caches that are never committed, nor snapshotted. */
+const isCacheFile = (dir: string, file: string) =>
+  file.endsWith('.json') && !file.startsWith('typed-') && !(dir === 'locators' && file.endsWith('.hand.json'));
 
 /** Every plan and locator cache file under runs/, with its contents: what a run is put back to afterwards. */
 export function captureCaches(root: string): Map<string, string> {

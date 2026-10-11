@@ -50,6 +50,8 @@ export const HealEventSchema = z.strictObject({
   reason: z.string(),
   validation: ValidationSchema,
   ms: z.number().nonnegative(),
+  /** When the locator stayed the same and the element moved: where to, e.g. 'from main to region "New arrivals"'. */
+  moved: z.string().optional(),
 });
 export type HealEvent = z.infer<typeof HealEventSchema>;
 

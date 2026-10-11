@@ -11,6 +11,7 @@
     "shop": "pnpm --filter @hackwave/shop start",
     "engine": "tsx packages/engine/src/cli.ts",
     "demo": "tsx packages/engine/src/cli.ts demo",
+    "ui": "tsx packages/engine/src/cli.ts ui",
     "lint": "eslint .",
     "typecheck": "tsc -p apps/shop/tsconfig.json && tsc -p apps/shop/tsconfig.node.json && tsc -p packages/contracts/tsconfig.json && tsc -p packages/verifier/tsconfig.json && tsc -p packages/engine/tsconfig.json",
     "test": "vitest run",

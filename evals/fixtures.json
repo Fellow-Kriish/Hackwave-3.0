@@ -243,7 +243,10 @@
       "reportIncludes": [
         "## Plan diff",
         "## Suggested fix",
-        "## Heal UI drift in checkout-valid-card"
+        "## Heal UI drift in checkout-valid-card",
+        "## What changed",
+        "is now called \"Your bag\"",
+        "had to be rebuilt from the goal"
       ]
     }
   },

@@ -18,6 +18,9 @@ runs/*
 !runs/snapshots/
 # hand-written plans heal into a scratch cache that is never committed
 runs/locators/*.hand.json
+# goals typed with `pnpm engine try` are scratch tests: their plan and locator caches stay local
+runs/plans/typed-*.json
+runs/locators/typed-*.json
 
 test-results/
 playwright-report/

@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -8,9 +9,12 @@ import { loadDotEnv } from './env';
 import { runEvals } from './evals';
 import { idFromGoal, scaffoldIntent } from './init';
 import { formatLint, lintIntentText } from './intent-lint';
+import { loadIntent } from './load';
 import { findRepoRoot } from './paths';
 import { listSnapshots, restoreSnapshot, saveSnapshot } from './snapshot';
 import { exitCodeFor, runIntent, SetupError } from './run';
+import { fetchCatalog, typedIntent } from './typed-goal';
+import { startUiServer } from './ui/server';
 
 const USAGE = `usage: pnpm engine <command> [options]
 
@@ -19,6 +23,7 @@ available now:
       [--cues] [--video] [--headless]    presenter lines; video.webm per act; no browser window
       [--slow-mo <ms>] [--keep-caches]   leave the caches as act 4 left them
       [--with-wrong-total]               a fifth act on the reserve bug (order saved at the wrong price)
+      [--same-url]                       one address for every act: Version A is deployed, then B is deployed over it
       [--llm-mode replay|record|live]    replay unless told otherwise; record fills gaps in runs/llm-cache
   doctor [--reset]                       preflight: Node, shops, reset endpoint, baseline, browser, replay cache, prompts, intents
   run --intent <file> --target <url>     one execution; streams events and writes a run folder under runs/
@@ -29,6 +34,11 @@ available now:
       [--llm-mode live|record|replay]    plan and locator caches are restored afterwards
       [--keep-caches]                    ... unless this is given
       [--headed] [--slow-mo <ms>]        watch every fixture's browser
+  try "<goal>" [--target <url>]          type a goal in plain words and test it now: planned by the model, checked by code
+      [--save] [--data <intent>]         keep it as intents/<id>.json; test data from another intent (default checkout)
+      [--headed] [--slow-mo <ms>] [--llm-mode live|record|replay]   live by default: a new sentence has no recording
+  ui [--port <n>] [--no-open]            the web app: type a goal, pick a version, watch it plan, act, heal and verify
+      [--headless] [--slow-mo <ms>]      a browser window is shown with slowMo 300 unless told otherwise
   lint <intent...>                       checks intent files: JSON, schema, inputs, placeholders; one line per problem
   init <goal> [--id <id>] [--out <file>] scaffolds intents/<id>.json from a goal sentence, with TODOs that lint flags
   snapshot save|restore <name>           copies the plan and locator caches to or from runs/snapshots/<name>
@@ -171,9 +181,69 @@ async function main(argv: string[]): Promise<number> {
   if (command === 'lint') return lint(args);
   if (command === 'init') return init(args);
   if (command === 'snapshot') return snapshot(args);
+  if (command === 'try') return tryGoal(args);
   if (command === 'demo') return demo(args);
+  if (command === 'ui') return ui(args);
   console.error(`Unknown command "${command}".\n\n${USAGE}`);
   return 2;
+}
+
+/**
+ * A goal typed in plain words, tested right away: the intent is built around it (test data from an existing intent,
+ * a success check written by code), then planned from scratch, run, healed and verified like any other.
+ */
+async function tryGoal(args: string[]): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args,
+    strict: true,
+    allowPositionals: true,
+    options: {
+      target: { type: 'string', default: 'http://localhost:5171' },
+      data: { type: 'string' },
+      save: { type: 'boolean', default: false },
+      'llm-mode': { type: 'string' },
+      headed: { type: 'boolean', default: false },
+      'slow-mo': { type: 'string' },
+    },
+  });
+  const goal = positionals.join(' ').trim();
+  if (goal.length < 10) throw new SetupError('try needs the goal as one sentence, e.g. pnpm engine try "Complete checkout with a valid credit card"');
+  const root = findRepoRoot();
+  let origin: string;
+  try {
+    origin = new URL(values.target).origin;
+  } catch {
+    throw new SetupError(`--target must be a URL, e.g. http://localhost:5171 (got "${values.target}")`);
+  }
+  const base = loadIntent(resolve(values.data ?? join(root, 'intents', 'checkout.json')));
+  const { intent, notes } = typedIntent(goal, base.inputs, await fetchCatalog(origin));
+  // Typed goals are scratch tests (git-ignored, caches included) unless saved as a real intent.
+  if (values.save) intent.id = intent.id.replace(/^typed-/, '');
+  const file = values.save ? join(root, 'intents', `${intent.id}.json`) : join(root, 'runs', 'typed', `${intent.id}.json`);
+  if (values.save && existsSync(file)) throw new SetupError(`intents/${intent.id}.json already exists; it is already a test (pnpm engine run --intent intents/${intent.id}.json)`);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(intent, null, 2)}\n`);
+  const label = relative(root, file).replace(/\\/g, '/');
+  console.log(`goal: "${goal}"`);
+  for (const note of notes) console.log(`  ${note}`);
+  console.log(`  intent written to ${label}${values.save ? ' (saved as a test you can commit)' : ' (a scratch test; --save keeps it under intents/)'}\n`);
+  const mode = llmMode(values['llm-mode']) ?? 'live';
+  try {
+    const { verdict } = await runIntent({
+      intentFile: file,
+      target: values.target,
+      headed: values.headed,
+      slowMo: slowMoOf(values['slow-mo']),
+      // A sentence nobody typed before has nothing recorded: plan it with the model.
+      envOverride: { LLM_MODE: mode },
+    });
+    return exitCodeFor(verdict);
+  } catch (error) {
+    if (error instanceof SetupError && /needs a model/.test(error.message)) {
+      throw new SetupError(`${error.message}\nA new goal is planned by the model: put LLM_API_KEY (and the models) in .env. The recorded demo needs none.`);
+    }
+    throw error;
+  }
 }
 
 function snapshot(args: string[]): number {
@@ -207,6 +277,7 @@ async function demo(args: string[]): Promise<number> {
       'slow-mo': { type: 'string' },
       'keep-caches': { type: 'boolean', default: false },
       'with-wrong-total': { type: 'boolean', default: false },
+      'same-url': { type: 'boolean', default: false },
       'llm-mode': { type: 'string' },
     },
   });
@@ -217,11 +288,46 @@ async function demo(args: string[]): Promise<number> {
     cues: values.cues,
     keepCaches: values['keep-caches'],
     withWrongTotal: values['with-wrong-total'],
+    sameUrl: values['same-url'],
     // The demo runs from the recorded cache unless asked otherwise: no key, no network, the same replies every time.
     envOverride: { LLM_MODE: llmMode(values['llm-mode']) ?? 'replay' },
     quiet: false,
   });
   return result.problems.length === 0 ? 0 : 1;
+}
+
+/** The web app on 127.0.0.1, until Ctrl+C. */
+async function ui(args: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args,
+    strict: true,
+    options: {
+      port: { type: 'string', default: '4321' },
+      'no-open': { type: 'boolean', default: false },
+      headless: { type: 'boolean', default: false },
+      'slow-mo': { type: 'string' },
+    },
+  });
+  const port = Number(values.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new SetupError(`--port must be a port number (got "${values.port}")`);
+  const server = await startUiServer({
+    port,
+    headed: !values.headless,
+    slowMo: values['slow-mo'] === undefined ? DEMO_SLOW_MO_MS : slowMoOf(values['slow-mo']),
+  }).catch((error: unknown) => {
+    throw new SetupError(error instanceof Error && 'code' in error && error.code === 'EADDRINUSE' ? `port ${port} is in use; pick another with --port` : String(error));
+  });
+  console.log(`HackWave web app: ${server.url}  (Ctrl+C to stop)`);
+  if (!values['no-open']) {
+    const [command, ...rest] = process.platform === 'win32' ? ['cmd', '/c', 'start', '""', server.url] : [process.platform === 'darwin' ? 'open' : 'xdg-open', server.url];
+    spawn(command, rest, { stdio: 'ignore', detached: true, windowsVerbatimArguments: process.platform === 'win32' }).on('error', () => undefined).unref();
+  }
+  await new Promise<void>((resolveStop) => {
+    // Ctrl+C, a kill, or closing the console window (SIGHUP on Windows): stop the app's shop with it.
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.once(signal, resolveStop);
+  });
+  await server.close();
+  return 0;
 }
 
 main(process.argv.slice(2)).then(
