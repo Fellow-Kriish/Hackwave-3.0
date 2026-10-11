@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "954a7babde8a7d02ca8e4175bab388e2385fa486c5f0a52b97d8e7ea0ffe8cbb",
+  "stage": "planner",
+  "prompt": "planner",
+  "promptVersion": "planner/2",
+  "promptHash": "124316365b9f1c519fbda2d105dc3e0d1da1e49171125b4a46e64f04a95bb817",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "b92dc71adf3723a624a500ba2cb843f4581fb7de976cfbae388f5d3d394abdb2",
+  "text": "{\"milestones\":[{\"key\":\"cart\",\"description\":\"Add Trail Runner shoes to the cart and open the cart.\",\"dependsOn\":[],\"completion\":{\"kind\":\"heading\",\"text\":\"Cart\"},\"terminal\":false},{\"key\":\"checkout\",\"description\":\"Review cart contents and proceed to checkout.\",\"dependsOn\":[\"cart\"],\"completion\":{\"kind\":\"heading\",\"text\":\"Shipping\"},\"terminal\":false},{\"key\":\"shipping\",\"description\":\"Enter shipping information.\",\"dependsOn\":[\"checkout\"],\"completion\":{\"kind\":\"filled\"},\"terminal\":false},{\"key\":\"payment\",\"description\":\"Enter payment information.\",\"dependsOn\":[\"shipping\"],\"completion\":{\"kind\":\"filled\"},\"terminal\":false},{\"key\":\"place-order\",\"description\":\"Place the order and view confirmation.\",\"dependsOn\":[\"payment\"],\"completion\":{\"kind\":\"heading\",\"text\":[\"Order confirmed\",\"Thank you\",\"Thanks\",\"Order placed\"]},\"terminal\":true}]}",
+  "usage": {
+    "input": 895,
+    "output": 755
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T03:48:16.838Z"
+}

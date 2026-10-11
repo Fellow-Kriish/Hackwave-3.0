@@ -2,6 +2,7 @@ import {
   CompletionSchema,
   parsePlan,
   PlanSchema,
+  sameTarget,
   sha256,
   StepSchema,
   type HealerIntent,
@@ -28,8 +29,9 @@ export interface PlanSource {
   /**
    * Steps for pending[0] and for each following milestone that can be done on this same screen.
    * pending[0] may already have steps (it was marked more); the new steps continue it.
+   * commit is the terminal milestone's committing step when it is already known.
    */
-  expand(page: Page, pending: Milestone[], done: Step[]): Promise<Map<string, Expansion>>;
+  expand(page: Page, pending: Milestone[], done: Step[], commit: Step | null): Promise<Map<string, Expansion>>;
 }
 
 export interface PlannerOptions {
@@ -69,9 +71,22 @@ function describeStep(step: Step): string {
   return `${step.action} ${target.role} "${name}"${within}${input}`;
 }
 
-async function screenOf(page: Page, limits: PlannerOptions['tree']): Promise<{ path: string; tree: PrunedTree }> {
+/**
+ * The pruned tree, with names that equal an input value marked "(= input <key>)". The name is already on the
+ * screen, so nothing new is revealed; the mark only tells the model which key to use as nameRef.
+ */
+async function screenOf(page: Page, limits: PlannerOptions['tree'], valueOwners: ReadonlyMap<string, string>): Promise<{ path: string; tree: PrunedTree }> {
   const snapshot = await page.locator('body').ariaSnapshot({ timeout: 3000 });
-  return { path: new URL(page.url()).pathname, tree: pruneAriaSnapshot(snapshot, limits) };
+  const pruned = pruneAriaSnapshot(snapshot, limits);
+  const text = pruned.text
+    .split('\n')
+    .map((line) => {
+      const name = /^\s*- [a-z]+ "((?:[^"\\]|\\.)*)"/.exec(line)?.[1];
+      const owner = name === undefined ? undefined : valueOwners.get(name.trim().toLowerCase());
+      return owner ? `${line} (= input ${owner})` : line;
+    })
+    .join('\n');
+  return { path: new URL(page.url()).pathname, tree: { ...pruned, text } };
 }
 
 export function createPlanner(options: PlannerOptions): PlanSource {
@@ -82,7 +97,7 @@ export function createPlanner(options: PlannerOptions): PlanSource {
 
   return {
     async plan(page) {
-      const { path, tree } = await screenOf(page, options.tree);
+      const { path, tree } = await screenOf(page, options.tree, valueOwners);
       const base = { intentId: healer.id, goalHash: options.goalHash, promptHash, createdAt: new Date().toISOString() };
       const schema = z
         .strictObject({
@@ -111,24 +126,40 @@ export function createPlanner(options: PlannerOptions): PlanSource {
       return parsePlan({ ...base, milestones: draft.milestones.map((milestone) => ({ ...milestone, steps: [] })) }, 'planner output');
     },
 
-    async expand(page, pending, done) {
-      const { path, tree } = await screenOf(page, options.tree);
+    async expand(page, pending, done, commit) {
+      const { path, tree } = await screenOf(page, options.tree, valueOwners);
       const known = new Set(inputKeys);
       const taken = new Set(done.map((step) => step.key));
       const schema = z
         .strictObject({
-          milestones: z.array(z.strictObject({ key: z.string(), steps: z.array(StepSchema).min(1), more: z.boolean().default(false) })).min(1),
+          milestones: z.array(z.strictObject({ milestone: z.string(), steps: z.array(StepSchema), more: z.boolean().default(false) })).min(1),
         })
         .superRefine((value, ctx) => {
           const issue = (path: (string | number)[], message: string) => ctx.addIssue({ code: 'custom', path, message });
           const seen = new Set(taken);
+          // The click that commits the goal belongs to the terminal milestone only (the terminal rule).
+          const terminalIndex = value.milestones.findIndex((milestone, index) => pending[index]?.terminal);
+          const terminalReply = terminalIndex === -1 ? undefined : value.milestones[terminalIndex];
+          const commitStep = terminalReply?.steps[terminalReply.steps.length - 1] ?? commit;
+          if (commitStep) {
+            value.milestones.forEach((milestone, index) => {
+              if (index === terminalIndex) return;
+              milestone.steps.forEach((step, stepIndex) => {
+                if (sameTarget(step, commitStep)) {
+                  issue(['milestones', index, 'steps', stepIndex], 'this is the click that commits the goal; it belongs only to the terminal milestone');
+                }
+              });
+            });
+          }
           value.milestones.forEach((milestone, index) => {
             const expected = pending[index];
             if (!expected) {
-              issue(['milestones', index], `only ${pending.length} milestone(s) remain; remove "${milestone.key}"`);
+              issue(['milestones', index], `only ${pending.length} milestone(s) remain; remove "${milestone.milestone}"`);
               return;
             }
-            if (milestone.key !== expected.key) issue(['milestones', index, 'key'], `must be "${expected.key}": expand milestones in the order given`);
+            if (milestone.milestone !== expected.key) {
+              issue(['milestones', index, 'milestone'], `must be "${expected.key}" (a milestone key from the list, not a step key): expand milestones in the order given`);
+            }
             milestone.steps.forEach((step, stepIndex) => {
               const at = ['milestones', index, 'steps', stepIndex];
               if (seen.has(step.key)) issue([...at, 'key'], `step key "${step.key}" is already used`);
@@ -156,6 +187,26 @@ export function createPlanner(options: PlannerOptions): PlanSource {
                 issue([...at, 'target', 'within'], `there is no ${within.role} "${within.name}" on this screen`);
               }
             });
+            // Empty steps close a milestone with nothing left to do: a started one, or one whose work a later
+            // milestone in this same reply covers. Never the terminal one, and never to skip a screen not seen yet.
+            if (milestone.steps.length === 0) {
+              const closesStarted = index === 0 && expected.steps.length > 0;
+              const coveredLater = value.milestones.slice(index + 1).some((later) => later.steps.length > 0);
+              if (expected.terminal) issue(['milestones', index, 'steps'], 'the terminal milestone needs the click that commits the goal');
+              else if (milestone.more) issue(['milestones', index, 'more'], 'a milestone closed with no steps cannot have "more": true');
+              else if (!closesStarted && !coveredLater) {
+                issue(['milestones', index, 'steps'], 'steps must not be empty here; close a milestone with "steps": [] only when a later milestone in this reply has steps');
+              }
+            }
+            milestone.steps.forEach((step, stepIndex) => {
+              if (step.action === 'press' && step.pressKey === 'Enter' && step.target?.role === 'textbox') {
+                issue(['milestones', index, 'steps', stepIndex], 'never press Enter in a text field: it submits the form; click the form\'s button instead');
+              }
+            });
+            const lastStep = milestone.steps[milestone.steps.length - 1];
+            if (milestone.more && lastStep && lastStep.action !== 'click' && lastStep.action !== 'press') {
+              issue(['milestones', index, 'more'], '"more": true is only for a milestone whose last step leaves this screen (a click); finish everything this screen allows in this reply');
+            }
             if (milestone.more && index !== value.milestones.length - 1) {
               issue(['milestones', index, 'more'], 'only the last milestone you return may have "more": true');
             }
@@ -176,11 +227,12 @@ export function createPlanner(options: PlannerOptions): PlanSource {
         ),
         'STEPS ALREADY DONE:',
         ...(done.length > 0 ? done.map((step) => `- ${step.key}: ${describeStep(step)}`) : ['(none)']),
+        `REPLY WITH THESE MILESTONE KEYS, IN THIS ORDER, STARTING WITH THE FIRST (a prefix of the list): ${pending.map((milestone) => milestone.key).join(', ')}`,
         'SCREEN (pruned accessibility tree):',
         tree.text,
       ].join('\n');
       const expansion = await llm.call({ stage: 'expand', prompt: prompts.expand, input, schema });
-      return new Map(expansion.milestones.map((milestone) => [milestone.key, { steps: milestone.steps, more: milestone.more }]));
+      return new Map(expansion.milestones.map((milestone) => [milestone.milestone, { steps: milestone.steps, more: milestone.more }]));
     },
   };
 }

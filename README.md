@@ -1,7 +1,8 @@
 # Hackwave-3.0
 
 Intent-based, self-healing E2E testing: tests that describe intent, heal their own path, and cannot lie about the outcome.
-The build plan is [docs/BUILD.md](docs/BUILD.md). Status: **P2 (LLM plumbing and planner) complete**, except the second-provider check (needs a second key).
+The build plan is [docs/BUILD.md](docs/BUILD.md). Status: **P2 (LLM plumbing and planner) complete.** The provider-switch
+eval currently runs groq and the custom driver pointed at Groq; a second vendor is still to be added.
 
 ## Quick start
 
@@ -64,6 +65,10 @@ pnpm engine eval v1-baseline                     # replay them: no key needed
 ```
 
 Commit `runs/llm-cache` and `runs/plans`; never commit `.env`.
+
+`pnpm engine eval provider-switch` runs v1 live once per provider that has `LLM_SWITCH_<PROVIDER>_MODEL` (and a key) in `.env`,
+skipping the rest. A profile without its own key reuses `LLM_API_KEY` only when it points at the same host, and two
+profiles on one host are run a minute apart so its per-minute token limit can refill.
 
 ## Checks
 

@@ -1,12 +1,21 @@
-import type { Milestone, Step } from '@hackwave/contracts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parsePlan, type Milestone, type Step } from '@hackwave/contracts';
 import { chromium, type Browser, type Page } from 'playwright';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { checkProgress } from './act';
 import { checkAllowed } from './allowlist';
 import { capturePage, stripLiveRegions } from './aria';
 import { completionHolds } from './completion';
+import { loadConfig } from './config';
+import { EventLog } from './events';
+import { execute } from './executor';
 import { concreteTarget, describeTarget, resolveRung1 } from './resolve';
 import { settle } from './settle';
+import { Timings } from './timing';
 
 describe('stripLiveRegions', () => {
   it('drops status, alert and timer subtrees and keeps everything else', () => {
@@ -37,6 +46,60 @@ describe('allowlist', () => {
     const fill = (inputRef: string): Step => ({ key: 'payment.number', action: 'fill', target: { role: 'textbox', name: 'Card number', synonyms: [] }, inputRef });
     expect(checkAllowed(fill('card.number'), origin, keys).ok).toBe(true);
     expect(checkAllowed(fill('card.upi'), origin, keys)).toMatchObject({ ok: false, code: 'action_refused' });
+  });
+
+  it('refuses Enter in a text field, which could submit a form outside the terminal rule', () => {
+    const press = (role: string, pressKey: 'Enter' | 'Tab'): Step => ({ key: 'form.key', action: 'press', target: { role, name: 'Full name', synonyms: [] }, pressKey });
+    expect(checkAllowed(press('textbox', 'Enter'), origin, keys)).toMatchObject({ ok: false, code: 'action_refused' });
+    expect(checkAllowed(press('textbox', 'Tab'), origin, keys).ok).toBe(true);
+    expect(checkAllowed(press('searchbox', 'Enter'), origin, keys).ok).toBe(true);
+  });
+});
+
+describe('terminal rule', () => {
+  it('refuses the committing click from any milestone but the terminal one, before acting', async () => {
+    let clicks = 0;
+    const server = createServer((request, response) => {
+      if (request.method === 'POST') clicks++;
+      response.setHeader('content-type', 'text/html');
+      response.end('<main><h1>Pay</h1><button onclick="fetch(\'/order\', { method: \'POST\' })">Place order</button></main>');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const dir = mkdtempSync(join(tmpdir(), 'terminal-test-'));
+    const browser = await chromium.launch();
+    try {
+      const page = await (await browser.newContext()).newPage();
+      const click = (key: string): Step => ({ key, action: 'click', target: { role: 'button', name: 'Place order', synonyms: [] } });
+      const plan = parsePlan({
+        intentId: 'i',
+        goalHash: 'g',
+        promptHash: 'hand-written',
+        createdAt: '2026-10-11T00:00:00.000Z',
+        milestones: [
+          { key: 'payment', description: 'd', completion: { kind: 'filled' }, steps: [click('payment.sneaky')] },
+          { key: 'place-order', description: 'd', dependsOn: ['payment'], completion: { kind: 'heading', text: 'Done' }, terminal: true, steps: [click('place-order.submit')] },
+        ],
+      });
+      const result = await execute({
+        page,
+        origin,
+        startUrl: `${origin}/`,
+        plan,
+        healer: { id: 'i', goal: 'g', inputKeys: [] },
+        inputs: {},
+        budgets: loadConfig().budgets,
+        settle: { sampleGapMs: 50, maxWaitMs: 500 },
+        events: new EventLog(join(dir, 'events.jsonl')),
+        timings: new Timings(),
+      });
+      expect(result).toMatchObject({ outcome: 'refused', reason: { code: 'commit_outside_terminal' }, actions: 0, terminalAttempted: false });
+      expect(clicks).toBe(0);
+    } finally {
+      await browser.close();
+      await new Promise((resolve) => server.close(resolve));
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -148,6 +211,7 @@ describe('on a real page', () => {
     });
     expect((await completionHolds(page, milestone({ kind: 'heading', text: 'Shoes' }), {})).holds).toBe(true);
     expect((await completionHolds(page, milestone({ kind: 'heading', text: 'Order confirmed' }), {})).holds).toBe(false);
+    expect((await completionHolds(page, milestone({ kind: 'heading', text: ['Order confirmed', 'Shoes'] }), {})).holds).toBe(true);
     expect((await completionHolds(page, milestone({ kind: 'visible', role: 'button', name: 'Cart (1)' }), {})).holds).toBe(true);
 
     const fill: Step = { key: 'payment.number', action: 'fill', target: { role: 'textbox', name: 'Card number', synonyms: [] }, inputRef: 'card.number' };

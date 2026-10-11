@@ -59,7 +59,8 @@ export type Step = z.infer<typeof StepSchema>;
 
 /** The healer's soft "I think I'm done": read from the aria tree, never from the store. */
 export const CompletionSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('heading'), text: z.string().min(1) }),
+  /** A visible heading contains the text, or any of several texts (useful before the screen has been seen). */
+  z.strictObject({ kind: z.literal('heading'), text: z.union([z.string().min(1), z.array(z.string().min(1)).min(1).max(6)]) }),
   z.strictObject({ kind: z.literal('visible'), role: RoleSchema, name: z.string().min(1) }),
   z.strictObject({ kind: z.literal('url'), pathPrefix: z.string().startsWith('/') }),
   /** Every fill step of the milestone shows its input value. */
@@ -76,8 +77,27 @@ export const MilestoneSchema = z.strictObject({
   terminal: z.boolean().default(false),
   /** Empty until the planner expands the milestone on the live screen; cached once it has run. */
   steps: z.array(StepSchema),
+  /** True once steps were written for it, even none (its work was covered by another milestone). */
+  expanded: z.boolean().optional(),
 });
 export type Milestone = z.infer<typeof MilestoneSchema>;
+
+/** A milestone is expanded when it has steps, or was explicitly closed with none. */
+export function isExpanded(milestone: Milestone): boolean {
+  return milestone.steps.length > 0 || milestone.expanded === true;
+}
+
+/** Same role, name and scope: the same element as far as a plan can tell. */
+export function sameTarget(a: Step, b: Step): boolean {
+  if (!('target' in a) || !('target' in b) || !a.target || !b.target) return false;
+  const scope = (step: typeof a.target) => (step.within ? `${step.within.role}|${step.within.name ?? ''}|${step.within.nameRef ?? ''}` : '');
+  return (
+    a.target.role === b.target.role &&
+    (a.target.name ?? '') === (b.target.name ?? '') &&
+    (a.target.nameRef ?? '') === (b.target.nameRef ?? '') &&
+    scope(a.target) === scope(b.target)
+  );
+}
 
 export const PlanSchema = z
   .strictObject({

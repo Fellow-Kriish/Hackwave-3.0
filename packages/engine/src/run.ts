@@ -3,6 +3,7 @@ import { basename, join, relative, resolve } from 'node:path';
 import {
   emptyRungHistogram,
   flattenInputs,
+  isExpanded,
   planInputProblems,
   redactForHealer,
   sha256,
@@ -129,7 +130,7 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
   const env = { ...process.env, ...options.envOverride };
   const llmCacheDir = join(root, 'runs', 'llm-cache');
   const settings = asSetupError(() => resolveLlmSettings(config, env, readManifest(llmCacheDir)));
-  const needsModel = planSource !== 'hand-written' && (!plan || plan.milestones.some((milestone) => milestone.steps.length === 0));
+  const needsModel = planSource !== 'hand-written' && (!plan || plan.milestones.some((milestone) => !isExpanded(milestone)));
   const plannerTier = settings.tiers[config.models.planner];
   if (needsModel && !plannerTier.ok) {
     throw new SetupError(`the planner needs a model (${planSource === 'planner' ? cacheNote : 'some milestones have no steps yet'}): ${plannerTier.problem}`);
@@ -171,6 +172,7 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
     deadline: () => runStartedMs + budgets.runMs,
     events,
     timings,
+    rejectDir: join(runDir, 'llm-rejected'),
   });
   const planner = planSource === 'hand-written' ? undefined : createPlanner({ llm, prompts, healer, inputValues: inputs, goalHash, tree: config.tree });
 

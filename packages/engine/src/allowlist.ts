@@ -24,6 +24,10 @@ export function checkAllowed(step: Step, origin: string, inputKeys: ReadonlySet<
   if (step.action === 'press' && !KEYS.has(step.pressKey)) {
     return { ok: false, code: 'action_refused', message: `${step.key}: only Enter and Tab may be pressed` };
   }
+  // Enter in a text field submits its form: that would be a terminal action outside the terminal rule.
+  if (step.action === 'press' && step.pressKey === 'Enter' && step.target?.role === 'textbox') {
+    return { ok: false, code: 'action_refused', message: `${step.key}: pressing Enter in a text field can submit a form; click its button instead` };
+  }
   if (step.action === 'navigate' && !sameOrigin(new URL(step.path, origin).toString(), origin)) {
     return { ok: false, code: 'action_refused', message: `${step.key}: navigation outside ${origin} is not allowed` };
   }

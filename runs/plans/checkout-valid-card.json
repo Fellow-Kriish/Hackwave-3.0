@@ -1,22 +1,21 @@
 {
   "intentId": "checkout-valid-card",
   "goalHash": "42646300fc554447c62459c09323e1edc6cf86d228b65205616093c8c7596d70",
-  "promptHash": "3d4dad9b129394c92ff36a48dbead652dc09c4e1718bb6712f4c72a8e81ed69c",
-  "createdAt": "2026-10-11T00:32:26.349Z",
+  "promptHash": "4d0f0168a3c21c6edb8bbe3543a301e14b557b2654fc303331be65997df404ca",
+  "createdAt": "2026-10-11T03:51:42.679Z",
   "milestones": [
     {
-      "key": "add-to-cart",
-      "description": "Add Trail Runner shoes to the cart.",
+      "key": "cart",
+      "description": "Add Trail Runner shoes to the cart and open the cart.",
       "dependsOn": [],
       "completion": {
-        "kind": "visible",
-        "role": "button",
-        "name": "Cart (1)"
+        "kind": "heading",
+        "text": "Cart"
       },
       "terminal": false,
       "steps": [
         {
-          "key": "add-to-cart.add",
+          "key": "cart.add",
           "action": "click",
           "target": {
             "role": "button",
@@ -27,21 +26,7 @@
               "nameRef": "product"
             }
           }
-        }
-      ]
-    },
-    {
-      "key": "cart",
-      "description": "Open the cart and review the selected items.",
-      "dependsOn": [
-        "add-to-cart"
-      ],
-      "completion": {
-        "kind": "heading",
-        "text": "Cart"
-      },
-      "terminal": false,
-      "steps": [
+        },
         {
           "key": "cart.open",
           "action": "click",
@@ -50,9 +35,24 @@
             "name": "Cart ({n})",
             "synonyms": []
           }
-        },
+        }
+      ],
+      "expanded": true
+    },
+    {
+      "key": "checkout",
+      "description": "Review cart contents and proceed to checkout.",
+      "dependsOn": [
+        "cart"
+      ],
+      "completion": {
+        "kind": "heading",
+        "text": "Shipping"
+      },
+      "terminal": false,
+      "steps": [
         {
-          "key": "cart.checkout",
+          "key": "checkout.proceed",
           "action": "click",
           "target": {
             "role": "button",
@@ -60,13 +60,14 @@
             "synonyms": []
           }
         }
-      ]
+      ],
+      "expanded": true
     },
     {
       "key": "shipping",
-      "description": "Enter shipping information for the order.",
+      "description": "Enter shipping information.",
       "dependsOn": [
-        "cart"
+        "checkout"
       ],
       "completion": {
         "kind": "filled"
@@ -113,11 +114,12 @@
           },
           "inputRef": "shipping.pincode"
         }
-      ]
+      ],
+      "expanded": true
     },
     {
       "key": "payment",
-      "description": "Enter credit‑card details to pay for the order.",
+      "description": "Enter payment information.",
       "dependsOn": [
         "shipping"
       ],
@@ -127,7 +129,7 @@
       "terminal": false,
       "steps": [
         {
-          "key": "payment.number",
+          "key": "payment.card-number",
           "action": "fill",
           "target": {
             "role": "textbox",
@@ -166,22 +168,28 @@
           },
           "inputRef": "card.name"
         }
-      ]
+      ],
+      "expanded": true
     },
     {
       "key": "place-order",
-      "description": "Confirm the purchase and view the order confirmation.",
+      "description": "Place the order and view confirmation.",
       "dependsOn": [
         "payment"
       ],
       "completion": {
         "kind": "heading",
-        "text": "Order confirmed"
+        "text": [
+          "Order confirmed",
+          "Thank you",
+          "Thanks",
+          "Order placed"
+        ]
       },
       "terminal": true,
       "steps": [
         {
-          "key": "place-order.confirm",
+          "key": "place-order.submit",
           "action": "click",
           "target": {
             "role": "button",
@@ -189,7 +197,8 @@
             "synonyms": []
           }
         }
-      ]
+      ],
+      "expanded": true
     }
   ]
 }

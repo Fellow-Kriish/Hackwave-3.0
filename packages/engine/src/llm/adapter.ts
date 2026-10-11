@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { sha256, type LlmCalls, type Tokens } from '@hackwave/contracts';
 import type { z } from 'zod';
@@ -26,7 +28,12 @@ export interface LlmAdapterOptions {
   events?: EventLog;
   timings?: Timings;
   fetchImpl?: FetchLike;
+  /** Where rejected replies are written for diagnosis (the run folder's llm-rejected/). */
+  rejectDir?: string;
 }
+
+/** How much of a rejected reply is shown back to the model on the retry. */
+const MAX_ECHOED_REPLY_CHARS = 4000;
 
 export interface LlmRequest<T> {
   stage: LlmStage;
@@ -167,10 +174,28 @@ export class LlmAdapter {
         return reply.value;
       }
       lastError = result.stopReason === 'length' ? `${reply.error}\n(the reply was cut off at the output token limit)` : reply.error;
-      user = `${request.input}\n\nYOUR PREVIOUS REPLY COULD NOT BE USED:\n${lastError}\nReply again with only the corrected JSON object.`;
+      this.keepRejected(stage, attempt, result.text, lastError);
+      // The one retry shows the model its own reply and what was wrong with it, so it can correct rather than regenerate.
+      user = [
+        request.input,
+        '',
+        'YOUR PREVIOUS REPLY:',
+        result.text.slice(0, MAX_ECHOED_REPLY_CHARS) || '(empty)',
+        '',
+        'IT COULD NOT BE USED BECAUSE:',
+        lastError,
+        '',
+        'Reply again with only the corrected JSON object.',
+      ].join('\n');
     }
     report({ cacheHit: false, attempts: 2, input, output, failed: lastError.split('\n')[0] ?? lastError });
     throw llmInvalidOutput(`${stage}: the model's reply was still invalid after one retry: ${lastError.replace(/\s+/g, ' ').slice(0, 300)}`);
+  }
+
+  private keepRejected(stage: LlmStage, attempt: number, text: string, error: string): void {
+    if (!this.options.rejectDir) return;
+    mkdirSync(this.options.rejectDir, { recursive: true });
+    writeFileSync(join(this.options.rejectDir, `call${this.calls}-${stage}-attempt${attempt}.txt`), `${error}\n\n--- reply ---\n${text}\n`);
   }
 
   private driverFor(endpoint: ProviderEndpoint): Driver {

@@ -12,6 +12,8 @@ import { runIntent, SetupError, type PlanSourceKind, type RunResult } from './ru
 import { startPrivateShop, type PrivateShop } from './shop-process';
 
 const CHECKS = ['state', 'binding', 'alerts'] as const;
+/** Pause between live provider-switch profiles on the same host, so its per-minute token limit refills. */
+const SAME_HOST_COOLDOWN_MS = 60_000;
 
 const ExpectSchema = z.strictObject({
   color: VerdictColorSchema,
@@ -94,29 +96,53 @@ function loadFixtures(root: string): Fixture[] {
   return parsed.data;
 }
 
-interface SwitchProfile {
+export interface SwitchProfile {
   provider: string;
   model: string | undefined;
   apiKey: string | undefined;
+  /** This profile's base URL; undefined means the registry default. */
+  baseUrl: string | undefined;
   skip: string | null;
 }
 
-/** LLM_SWITCH_<PROVIDER>_MODEL / _API_KEY, plus the main LLM_PROVIDER profile from .env. */
-function switchProfiles(config: EngineConfig, env: NodeJS.ProcessEnv): SwitchProfile[] {
+function hostOf(url: string | null | undefined): string | null {
+  try {
+    return url ? new URL(url).host : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One profile per provider in the registry, from LLM_SWITCH_<PROVIDER>_MODEL, _API_KEY and _BASE_URL, plus the
+ * main LLM_PROVIDER profile from .env. A profile without its own key reuses the main key only when it points at
+ * the same host the main key already goes to: a key is never sent to another host.
+ */
+export function switchProfiles(config: EngineConfig, env: Readonly<Record<string, string | undefined>>): SwitchProfile[] {
   const value = (key: string) => {
     const text = env[key]?.trim();
     return text && text !== 'replace-me' ? text : undefined;
   };
   const main = value('LLM_PROVIDER') ?? config.llm.provider;
-  return Object.entries(config.llm.providers)
-    .filter(([provider]) => provider !== 'custom')
-    .map(([provider, entry]) => {
-      const prefix = `LLM_SWITCH_${provider.toUpperCase().replace(/-/g, '_')}`;
-      const model = value(`${prefix}_MODEL`) ?? (provider === main ? value('LLM_MODEL_STRONG') : undefined);
-      const apiKey = value(`${prefix}_API_KEY`) ?? (provider === main ? value('LLM_API_KEY') : undefined);
-      const skip = !model ? `no ${prefix}_MODEL` : entry.needsKey && !apiKey ? `no ${prefix}_API_KEY` : null;
-      return { provider, model, apiKey, skip };
-    });
+  const mainKey = value('LLM_API_KEY');
+  const mainHost = hostOf(value('LLM_BASE_URL') ?? config.llm.baseUrl ?? config.llm.providers[main]?.baseUrl);
+  return Object.entries(config.llm.providers).map(([provider, entry]) => {
+    const prefix = `LLM_SWITCH_${provider.toUpperCase().replace(/-/g, '_')}`;
+    const isMain = provider === main;
+    const model = value(`${prefix}_MODEL`) ?? (isMain ? value('LLM_MODEL_STRONG') : undefined);
+    const baseUrl = value(`${prefix}_BASE_URL`) ?? (isMain ? value('LLM_BASE_URL') : undefined);
+    const host = hostOf(baseUrl ?? entry.baseUrl);
+    const sameHostAsMainKey = mainKey !== undefined && host !== null && host === mainHost;
+    const apiKey = value(`${prefix}_API_KEY`) ?? (isMain || sameHostAsMainKey ? mainKey : undefined);
+    const skip = !model
+      ? `no ${prefix}_MODEL`
+      : host === null
+        ? `no ${prefix}_BASE_URL`
+        : entry.needsKey && !apiKey
+          ? `no ${prefix}_API_KEY`
+          : null;
+    return { provider, model, apiKey, baseUrl, skip };
+  });
 }
 
 /**
@@ -204,12 +230,20 @@ export async function runEvals(options: { only?: string; verbose?: boolean; llmM
       const profiles = switchProfiles(config, process.env);
       const runnable = profiles.filter((profile) => profile.skip === null);
       let switchFailed = false;
+      let lastHost: string | null = null;
       try {
         for (const profile of profiles) {
           if (profile.skip) {
             console.log(dim(`  - ${fixture.name}[${profile.provider}]: skipped (${profile.skip})`));
             continue;
           }
+          // Two live runs in a row against one host share its per-minute token limit: let it refill first.
+          const host = hostOf(profile.baseUrl ?? config.llm.providers[profile.provider]?.baseUrl);
+          if (host !== null && host === lastHost) {
+            console.log(dim(`  … waiting ${SAME_HOST_COOLDOWN_MS / 1000} s: the previous profile used ${host} too (per-minute rate limit)`));
+            await new Promise((resolve) => setTimeout(resolve, SAME_HOST_COOLDOWN_MS));
+          }
+          lastHost = host;
           const providerStarted = Date.now();
           const result = await run({
             LLM_MODE: 'live',
@@ -219,7 +253,7 @@ export async function runEvals(options: { only?: string; verbose?: boolean; llmM
             LLM_MODEL_FAST: profile.model,
             LLM_PROVIDER_FAST: '',
             LLM_API_KEY_FAST: '',
-            LLM_BASE_URL: '',
+            LLM_BASE_URL: profile.baseUrl ?? '',
           });
           const problems = compare(fixture.expect, result.verdict, result.planSource);
           if (problems.length > 0) switchFailed = true;

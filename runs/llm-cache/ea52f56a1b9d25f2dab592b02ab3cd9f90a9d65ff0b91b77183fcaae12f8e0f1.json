@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "ea52f56a1b9d25f2dab592b02ab3cd9f90a9d65ff0b91b77183fcaae12f8e0f1",
+  "stage": "expand",
+  "prompt": "expand",
+  "promptVersion": "expand/11",
+  "promptHash": "77e37049dca1e32823c50d3ffadace758f83a5f46698a8112f48095f29d2c1cc",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "9907d4530d2bd0cd29371391bf5cd862e6ef350617c8872c8eb2955cb866a139",
+  "text": "{\"milestones\":[{\"milestone\":\"cart\",\"steps\":[{\"key\":\"cart.add\",\"action\":\"click\",\"target\":{\"role\":\"button\",\"name\":\"Add to cart\",\"within\":{\"role\":\"article\",\"nameRef\":\"product\"}}},{\"key\":\"cart.open\",\"action\":\"click\",\"target\":{\"role\":\"button\",\"name\":\"Cart ({n})\"}}],\"more\":true}]}",
+  "usage": {
+    "input": 1547,
+    "output": 499
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T03:48:22.021Z"
+}
