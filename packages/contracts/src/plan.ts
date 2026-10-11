@@ -20,8 +20,9 @@ export const ScopeSchema = z
 export type Scope = z.infer<typeof ScopeSchema>;
 
 /**
- * What a step acts on, by role and accessible name. Names that are input values (the product) are given
- * as nameRef so a plan never carries a literal input value.
+ * What a step acts on, by role and accessible name. Names match exactly; "{n}" in a name stands for any
+ * whole number, for labels whose count changes during the run ("Cart ({n})"). Names that are input values
+ * (the product) are given as nameRef so a plan never carries a literal input value.
  */
 export const TargetSchema = z
   .strictObject({
@@ -73,6 +74,7 @@ export const MilestoneSchema = z.strictObject({
   completion: CompletionSchema,
   /** True only for the action that commits the goal (place order). It runs at most once per run. */
   terminal: z.boolean().default(false),
+  /** Empty until the planner expands the milestone on the live screen; cached once it has run. */
   steps: z.array(StepSchema),
 });
 export type Milestone = z.infer<typeof MilestoneSchema>;
@@ -109,12 +111,14 @@ export const PlanSchema = z
         }
         stepKeys.add(step.key);
       });
-      if (milestone.terminal && milestone.steps.length === 0) {
-        ctx.addIssue({ code: 'custom', path: ['milestones', index, 'steps'], message: 'the terminal milestone needs its action' });
-      }
     });
     if (plan.milestones.filter((milestone) => milestone.terminal).length > 1) {
       ctx.addIssue({ code: 'custom', path: ['milestones'], message: 'a plan has at most one terminal milestone' });
+    }
+    // Nothing runs after the terminal action: the run goes straight to the verifier.
+    const terminalIndex = plan.milestones.findIndex((milestone) => milestone.terminal);
+    if (terminalIndex !== -1 && terminalIndex !== plan.milestones.length - 1) {
+      ctx.addIssue({ code: 'custom', path: ['milestones', terminalIndex, 'terminal'], message: 'the terminal milestone must be the last one' });
     }
   });
 export type Plan = z.infer<typeof PlanSchema>;

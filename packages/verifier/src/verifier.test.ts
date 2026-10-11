@@ -134,7 +134,7 @@ describe('createVerifier against a real page', () => {
     heals: [],
     replans: [],
     rungHistogram: emptyRungHistogram(),
-    llmCalls: { total: 0, byModel: {} },
+    llmCalls: { total: 0, cached: 0, byModel: {} },
     tokens: { input: 0, output: 0, byModel: {} },
     timings: { browserMs: 0, llmMs: 0, totalMs: 0, steps: [] },
     environmentErrors: [],
@@ -225,12 +225,15 @@ describe('lint boundary', () => {
     expect(await lint("export const load = () => import('../../engine/src/llm/adapter');\n")).toContain('no-restricted-syntax');
   });
 
-  it('applies to contracts as well, and leaves the engine free to use its own adapter', async () => {
+  it('applies to contracts as well', async () => {
     expect(await lint("import { x } from '@hackwave/engine';\nexport const y = x;\n", 'packages/contracts/src/probe.ts')).toContain(
       '@typescript-eslint/no-restricted-imports',
     );
-    expect(await lint("import { x } from './llm/adapter';\nexport const y = x;\n", 'packages/engine/src/probe.ts')).not.toContain(
-      '@typescript-eslint/no-restricted-imports',
-    );
+  });
+
+  it('lets the planner use the LLM adapter but never the executor', async () => {
+    const code = "import { LlmAdapter } from './llm';\nexport const y = LlmAdapter;\n";
+    expect(await lint(code, 'packages/engine/src/planner.ts')).not.toContain('@typescript-eslint/no-restricted-imports');
+    expect(await lint(code, 'packages/engine/src/executor.ts')).toContain('@typescript-eslint/no-restricted-imports');
   });
 });

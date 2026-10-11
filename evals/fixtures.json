@@ -79,29 +79,27 @@
   {
     "name": "v1-baseline",
     "description": "v1 from an empty cache: plan produced; 0 heals; at most 4 LLM calls.",
-    "pending": "P2",
     "intent": "intents/checkout.json",
     "target": "v1",
     "cache": "empty",
-    "expect": { "color": "GREEN", "heals": 0, "maxLlmCalls": 4 }
+    "expect": { "color": "GREEN", "kind": "passed", "planSource": "planner", "heals": 0, "maxLlmCalls": 4 }
   },
   {
     "name": "v1-cached",
     "description": "v1 after v1-baseline: 0 LLM calls.",
-    "pending": "P2",
     "intent": "intents/checkout.json",
     "target": "v1",
     "cache": "after:v1-baseline",
-    "expect": { "color": "GREEN", "maxLlmCalls": 0 }
+    "expect": { "color": "GREEN", "kind": "passed", "planSource": "cache", "heals": 0, "maxLlmCalls": 0 }
   },
   {
     "name": "provider-switch",
     "description": "v1 from an empty cache in live mode, once per provider with a key in .env; skipped, not failed, for providers without one.",
-    "pending": "P2",
     "intent": "intents/checkout.json",
     "target": "v1",
     "cache": "empty",
-    "expect": { "color": "GREEN" }
+    "providerSwitch": true,
+    "expect": { "color": "GREEN", "kind": "passed", "planSource": "planner", "heals": 0, "maxLlmCalls": 4 }
   },
   {
     "name": "v2-drift",

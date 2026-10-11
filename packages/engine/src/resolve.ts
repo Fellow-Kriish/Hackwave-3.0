@@ -29,10 +29,22 @@ export function describeTarget(target: ConcreteTarget): string {
   return `${target.role} "${target.name}"${scope}`;
 }
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** A whole-name pattern: the name exactly, with each "{n}" standing for any whole number ("Cart ({n})"). */
+export function namePattern(name: string): RegExp {
+  return new RegExp(`^${name.split('{n}').map(escapeRegExp).join('\\d+')}$`);
+}
+
+/** getByRole options: an exact name, or the whole-name pattern when the name carries {n}. */
+export function nameOption(name: string): { name: string | RegExp; exact?: boolean } {
+  return name.includes('{n}') ? { name: namePattern(name) } : { name, exact: true };
+}
+
 /** Semantic locators only: getByRole with an exact accessible name, scoped first when a scope is given. */
 export function buildLocator(page: Page, target: ConcreteTarget): { scope: Locator | null; locator: Locator } {
-  const scope = target.within ? page.getByRole(target.within.role as AriaRole, { name: target.within.name, exact: true }) : null;
-  const locator = (scope ?? page).getByRole(target.role as AriaRole, { name: target.name, exact: true });
+  const scope = target.within ? page.getByRole(target.within.role as AriaRole, nameOption(target.within.name)) : null;
+  const locator = (scope ?? page).getByRole(target.role as AriaRole, nameOption(target.name));
   return { scope, locator };
 }
 

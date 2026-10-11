@@ -8,6 +8,18 @@ export interface ReportContext {
   planFile: string;
   planSource: string;
   runDir: string;
+  llmMode: string;
+}
+
+function llmLine(verdict: Verdict): string {
+  const models = Object.entries(verdict.llmCalls.byModel)
+    .map(([model, calls]) => {
+      const tokens = verdict.tokens.byModel[model];
+      return `${model}: ${calls} call(s), ${tokens?.input ?? 0} in / ${tokens?.output ?? 0} out`;
+    })
+    .join('; ');
+  const cached = verdict.llmCalls.cached > 0 ? ` (${verdict.llmCalls.cached} from cache)` : '';
+  return `${verdict.llmCalls.total}${cached}${models ? ` · ${models}` : ''}`;
 }
 
 const KIND_LABEL: Record<Verdict['kind'], string> = {
@@ -58,7 +70,7 @@ export function renderReport(verdict: Verdict, context: ReportContext): string {
     `- Budgets: ${b.maxActions} actions, ${seconds(b.runMs)} per run, ${seconds(b.stepMs)} per step, ${b.maxReplansPerMilestone} re-plans per milestone, ${b.maxLlmCallsPerRun} LLM calls, ${b.maxRung3AttemptsPerStepPerScreen} rung-3 attempt per step per screen`,
     `- Ladder: accept ${config.ladder.similarityAccept}, margin ${config.ladder.similarityMargin}, ${config.ladder.candidatesPerStep} candidates, full tree below ${config.ladder.fullTreeBelowScore}, vision ${config.ladder.visionEnabled ? 'on' : 'off'}`,
     `- Tree: ${config.tree.maxNodes} nodes, ${config.tree.maxTextChars} chars · Settle: ${config.settle.sampleGapMs} ms gap, ${config.settle.maxWaitMs} ms max · Verifier poll: ${config.verifier.pollMs} ms`,
-    `- LLM: mode ${config.llm.mode}, provider ${config.llm.provider}${config.llm.providerFast ? `, fast tier on ${config.llm.providerFast}` : ''}`,
+    `- LLM: mode ${context.llmMode}; tiers planner ${config.models.planner}, re-planner ${config.models.replanner}, resolver ${config.models.resolver}, explain ${config.models.explain}; input cap ${config.llm.maxInputTokens} tokens, output cap ${config.llm.maxOutputTokens}`,
     '',
     '## Reasons',
     '',
@@ -85,7 +97,8 @@ export function renderReport(verdict: Verdict, context: ReportContext): string {
     `- Outcome: ${record.outcome}${record.reason ? ` (${record.reason.code}: ${record.reason.message})` : ''}; terminal action ${record.terminalAttempted ? 'attempted once' : 'never attempted'}`,
     `- Actions: ${record.actions} of ${b.maxActions}; last step \`${record.lastStepKey ?? 'none'}\``,
     `- Rung histogram: ${histogram(verdict)}`,
-    `- Heals: ${verdict.heals.length} · Re-plans: ${verdict.replans.length} · LLM calls: ${verdict.llmCalls.total} · Tokens: ${verdict.tokens.input} in, ${verdict.tokens.output} out`,
+    `- Heals: ${verdict.heals.length} · Re-plans: ${verdict.replans.length}`,
+    `- LLM calls: ${llmLine(verdict)}`,
     `- Time: browser ${seconds(verdict.timings.browserMs)} · LLM ${seconds(verdict.timings.llmMs)} · total ${seconds(verdict.timings.totalMs)}`,
     ...(record.environmentErrors.length > 0 ? ['', 'Environment errors:', '', ...record.environmentErrors.map((error) => `- ${error}`)] : []),
     '',
@@ -109,7 +122,8 @@ export function printFinalBlock(verdict: Verdict, context: ReportContext): void 
   for (const reason of verdict.reasons) console.log(color(`  ${reason.code}: ${reason.message}`));
   console.log(`  ${healerLine(verdict)} · verifier: ${verdict.color}`);
   if (verdict.oracle.finalHeading) console.log(dim(`  final page: "${verdict.oracle.finalHeading}"`));
-  console.log(dim(`  ${histogram(verdict)} · heals ${verdict.heals.length} · re-plans ${verdict.replans.length} · LLM calls ${verdict.llmCalls.total}`));
+  console.log(dim(`  ${histogram(verdict)} · heals ${verdict.heals.length} · re-plans ${verdict.replans.length}`));
+  console.log(dim(`  plan: ${context.planSource} · LLM calls ${llmLine(verdict)}`));
   console.log(dim(`  browser ${seconds(verdict.timings.browserMs)} · LLM ${seconds(verdict.timings.llmMs)} · total ${seconds(verdict.timings.totalMs)}`));
   console.log(dim(`  report: ${context.runDir}`));
 }

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "tiers": {
+    "strong": {
+      "provider": "groq",
+      "model": "openai/gpt-oss-120b"
+    },
+    "fast": {
+      "provider": "groq",
+      "model": "openai/gpt-oss-120b"
+    }
+  },
+  "prompts": {
+    "planner": "a27cf0221cf2164f420a997ce2816abb3e7db9db7cb0f565b968eadc89c0a029",
+    "expand": "0c94b99a38ffc957d0b05d69e52984491f62db27049801544b440c474d0a770a"
+  },
+  "updatedAt": "2026-10-11T00:30:26.853Z"
+}

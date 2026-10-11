@@ -37,7 +37,7 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
     heals: [],
     replans: [],
     rungHistogram: { ...emptyRungHistogram(), '1': 12 },
-    llmCalls: { total: 0, byModel: {} },
+    llmCalls: { total: 0, cached: 0, byModel: {} },
     tokens: { input: 0, output: 0, byModel: {} },
     timings: { browserMs: 4000, llmMs: 0, totalMs: 5000, steps: [] },
     environmentErrors: [],

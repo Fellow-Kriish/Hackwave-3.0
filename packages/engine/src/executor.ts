@@ -17,6 +17,8 @@ import { checkAllowed, sameOrigin } from './allowlist';
 import type { PageState } from './aria';
 import { completionHolds } from './completion';
 import type { EventLog } from './events';
+import { OutcomeError } from './outcome';
+import type { PlanSource } from './planner';
 import { concreteTarget, describeTarget, resolveRung1, type ConcreteTarget } from './resolve';
 import { settle, type SettleConfig } from './settle';
 import type { Timings } from './timing';
@@ -26,7 +28,10 @@ export interface ExecuteInput {
   /** The app origin; navigation and requests outside it are refused. */
   origin: string;
   startUrl: string;
-  plan: Plan;
+  /** A hand-written or cached plan, or null to have the planner write one from the landing screen. */
+  plan: Plan | null;
+  /** Writes the plan and expands milestones that have no steps yet. Absent for hand-written plans. */
+  planner?: PlanSource;
   /** Goal and input keys only: everything the healer is allowed to know. */
   healer: HealerIntent;
   /** Input values by key, used to fill fields and to name scopes. Never logged, never sent to a model. */
@@ -48,28 +53,28 @@ export interface ExecutionResult {
   lastStepKey: string | null;
   rungHistogram: RungHistogram;
   environmentErrors: string[];
+  /** The plan as executed, expansions included. */
+  plan: Plan | null;
+  /** Milestones whose steps were written during this run. */
+  expanded: string[];
+  /** Milestones whose steps all ran through. */
+  completed: string[];
 }
 
-/** Ends execution with a verdict-relevant outcome. */
-class Stop extends Error {
-  constructor(
-    readonly outcome: RunOutcome,
-    readonly reason: Reason,
-  ) {
-    super(reason.message);
-  }
-}
+/** A milestone marked "more" is expanded again on each new screen, at most this many times. */
+const MAX_REEXPANSIONS_PER_MILESTONE = 3;
 
 /** Connection-level failures only; aborted requests (navigation) and our own blocks are not environment errors. */
 const CONNECTION_ERROR =
   /net::ERR_(CONNECTION_REFUSED|CONNECTION_RESET|CONNECTION_CLOSED|CONNECTION_FAILED|EMPTY_RESPONSE|NAME_NOT_RESOLVED|INTERNET_DISCONNECTED|TIMED_OUT|ADDRESS_UNREACHABLE|NETWORK_CHANGED)/;
 
-function classify(error: unknown): Reason {
+function classify(error: unknown): OutcomeError {
+  if (error instanceof OutcomeError) return error;
   const message = (error instanceof Error ? error.message : String(error)).split('\n')[0]?.trim() || 'unknown error';
-  if (error instanceof errors.TimeoutError) return { code: 'step_timeout', message };
-  if (/has been closed|crash/i.test(message)) return { code: 'browser_crash', message };
-  if (/net::ERR_/.test(message)) return { code: 'navigation_error', message };
-  return { code: 'unexpected_error', message };
+  if (error instanceof errors.TimeoutError) return new OutcomeError('environment', 'step_timeout', message);
+  if (/has been closed|crash/i.test(message)) return new OutcomeError('environment', 'browser_crash', message);
+  if (/net::ERR_/.test(message)) return new OutcomeError('environment', 'navigation_error', message);
+  return new OutcomeError('environment', 'unexpected_error', message);
 }
 
 /**
@@ -78,12 +83,19 @@ function classify(error: unknown): Reason {
  * hands straight over to the verifier. Every step of the way is a line in events.jsonl.
  */
 export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
-  const { page, origin, plan, budgets, events, timings, inputs } = input;
+  const { page, origin, budgets, events, timings, inputs, planner } = input;
   const startedAt = performance.now();
   const elapsedMs = () => Math.round(performance.now() - startedAt);
   const inputKeys = new Set(input.healer.inputKeys);
   const rungHistogram = emptyRungHistogram();
   const environmentErrors: string[] = [];
+  const expanded: string[] = [];
+  const completed: string[] = [];
+  const doneSteps: Step[] = [];
+  /** Milestones whose expansion said "more": they continue on a later screen. */
+  const needsMore = new Set<string>();
+  const reexpansions = new Map<string, number>();
+  let plan: Plan | null = input.plan ? structuredClone(input.plan) : null;
   let actions = 0;
   let lastStepKey: string | null = null;
   let terminalAttempted = false;
@@ -109,12 +121,15 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     lastStepKey,
     rungHistogram,
     environmentErrors,
+    plan,
+    expanded,
+    completed,
   });
 
   /** Time left for one step: the step budget, capped by what remains of the run budget. */
   const stepBudget = (): number => {
     const left = budgets.runMs - elapsedMs();
-    if (left <= 0) throw new Stop('environment', { code: 'run_timeout', message: `run budget of ${budgets.runMs} ms exhausted` });
+    if (left <= 0) throw new OutcomeError('environment', 'run_timeout', `run budget of ${budgets.runMs} ms exhausted`);
     return Math.min(budgets.stepMs, left);
   };
 
@@ -126,14 +141,15 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
 
   /** One step: resolve, act, settle, check progress. Returns true once the terminal action has run. */
   async function runStep(milestone: Milestone, index: number, step: Step): Promise<boolean> {
-    const isTerminalAction = milestone.terminal && index === milestone.steps.length - 1;
+    // The terminal action is the last step of the terminal milestone once it is fully expanded.
+    const isTerminalAction = milestone.terminal && index === milestone.steps.length - 1 && !needsMore.has(milestone.key);
     if (actions >= budgets.maxActions) {
-      throw new Stop('unresolvable', { code: 'action_budget_exhausted', message: `action budget of ${budgets.maxActions} exhausted` });
+      throw new OutcomeError('unresolvable', 'action_budget_exhausted', `action budget of ${budgets.maxActions} exhausted`);
     }
     const allowed = checkAllowed(step, origin, inputKeys);
     if (!allowed.ok) {
       events.emit('refused', { milestoneKey: milestone.key, stepKey: step.key, message: allowed.message });
-      throw new Stop('refused', { code: allowed.code, message: allowed.message });
+      throw new OutcomeError('refused', allowed.code, allowed.message);
     }
 
     let locator: Locator | null = null;
@@ -152,10 +168,11 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
           validation: result.resolved.validation,
           ms: result.resolved.ms,
         });
-        throw new Stop('unresolvable', {
-          code: 'rung1_unresolved',
-          message: `rung 1 could not resolve ${target}: ${result.reason} (healing rungs 2-5 are not built yet)`,
-        });
+        throw new OutcomeError(
+          'unresolvable',
+          'rung1_unresolved',
+          `rung 1 could not resolve ${target}: ${result.reason} (healing rungs 2-5 are not built yet)`,
+        );
       }
       rungHistogram['1']++;
       events.emit('resolved', {
@@ -180,6 +197,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     actions++;
     const actionStarted = performance.now();
     await perform(page, step, locator, value, origin, stepBudget());
+    doneSteps.push(step);
     events.emit('action', {
       milestoneKey: milestone.key,
       stepKey: step.key,
@@ -202,20 +220,50 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     }
 
     if (!sameOrigin(page.url(), origin)) {
-      throw new Stop('refused', { code: 'left_origin', message: `the page left ${origin} for ${page.url()}` });
+      throw new OutcomeError('refused', 'left_origin', `the page left ${origin} for ${page.url()}`);
     }
 
     const nextStep = milestone.steps[index + 1];
     const nextTarget: ConcreteTarget | null = nextStep && 'target' in nextStep && nextStep.target ? concreteTarget(nextStep.target, inputs) : null;
     const progress = await checkProgress({ page, step, locator, value, before, after, nextTarget });
     events.emit('progress', { stepKey: step.key, ok: progress.ok, detail: progress.detail });
-    if (!progress.ok) throw new Stop('unresolvable', { code: 'no_progress', message: `${step.key}: ${progress.detail}` });
+    if (!progress.ok) throw new OutcomeError('unresolvable', 'no_progress', `${step.key}: ${progress.detail}`);
 
     unchangedActions = after.fullHash === before.fullHash ? unchangedActions + 1 : 0;
     if (unchangedActions >= 3) {
-      throw new Stop('unresolvable', { code: 'loop_detected', message: 'the page did not change across three consecutive actions' });
+      throw new OutcomeError('unresolvable', 'loop_detected', 'the page did not change across three consecutive actions');
     }
     return false;
+  }
+
+  /**
+   * Steps for this milestone and the next ones on the same screen, written by the planner on the live page.
+   * When continuing, the milestone already has steps and the new ones are appended.
+   */
+  async function expandFrom(current: Plan, milestone: Milestone, done: Set<string>, continuing: boolean): Promise<void> {
+    if (!planner) throw new OutcomeError('unresolvable', 'plan_incomplete', `milestone ${milestone.key} has no steps and there is no planner`);
+    const start = current.milestones.indexOf(milestone);
+    const pending: Milestone[] = continuing ? [milestone] : [];
+    for (const candidate of current.milestones.slice(continuing ? start + 1 : start)) {
+      if (done.has(candidate.key) || candidate.steps.length > 0) break;
+      pending.push(candidate);
+    }
+    const written = await planner.expand(page, pending, doneSteps);
+    for (const candidate of pending) {
+      const expansion = written.get(candidate.key);
+      if (!expansion) continue;
+      candidate.steps = candidate === milestone && continuing ? [...candidate.steps, ...expansion.steps] : expansion.steps;
+      if (expansion.more) needsMore.add(candidate.key);
+      else needsMore.delete(candidate.key);
+      if (!expanded.includes(candidate.key)) expanded.push(candidate.key);
+    }
+    events.emit('expanded', {
+      milestones: pending.filter((candidate) => written.has(candidate.key)).map((candidate) => candidate.key),
+      steps: [...written.values()].reduce((sum, expansion) => sum + expansion.steps.length, 0),
+      more: [...written].filter(([, expansion]) => expansion.more).map(([key]) => key),
+      path: new URL(page.url()).pathname,
+    });
+    state = await settleNow(`after expanding ${milestone.key}`);
   }
 
   try {
@@ -224,35 +272,59 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       events.emit('navigated', { url: page.url() });
       state = await settleNow('start');
     });
+
+    if (!plan) {
+      if (!planner) throw new OutcomeError('unresolvable', 'no_plan', 'there is no plan and no planner');
+      plan = await planner.plan(page);
+      events.emit('planned', {
+        milestones: plan.milestones.map((milestone) => ({ key: milestone.key, terminal: milestone.terminal, completion: milestone.completion })),
+      });
+    }
+    const current = plan;
     const done = new Set<string>();
 
     for (;;) {
-      const milestone = plan.milestones.find((m) => !done.has(m.key) && m.dependsOn.every((dependency) => done.has(dependency)));
+      const milestone = current.milestones.find((m) => !done.has(m.key) && m.dependsOn.every((dependency) => done.has(dependency)));
       if (!milestone) break;
       events.emit('milestone_started', { milestoneKey: milestone.key, description: milestone.description, terminal: milestone.terminal });
+      if (milestone.steps.length === 0) await expandFrom(current, milestone, done, false);
 
-      for (const [index, step] of milestone.steps.entries()) {
+      for (let index = 0; ; index++) {
+        if (index >= milestone.steps.length) {
+          if (!needsMore.has(milestone.key)) break;
+          // The milestone continues on this new screen: expand it again, within a bound.
+          const count = (reexpansions.get(milestone.key) ?? 0) + 1;
+          if (count > MAX_REEXPANSIONS_PER_MILESTONE) {
+            throw new OutcomeError('unresolvable', 'expansion_loop', `milestone ${milestone.key} still needed more steps after ${MAX_REEXPANSIONS_PER_MILESTONE} screens`);
+          }
+          reexpansions.set(milestone.key, count);
+          await expandFrom(current, milestone, done, true);
+        }
+        const step = milestone.steps[index];
+        if (!step) break;
         lastStepKey = step.key;
         const reachedTerminal = await timings.measure('browser', step.key, () => runStep(milestone, index, step));
-        if (reachedTerminal) return finish('completed', null);
+        if (reachedTerminal) {
+          completed.push(milestone.key);
+          return finish('completed', null);
+        }
       }
+      completed.push(milestone.key);
 
+      // Completion is the healer's soft notion: it is reported, never used to fail a run.
       const completion = await completionHolds(page, milestone, inputs);
       events.emit('milestone_done', { milestoneKey: milestone.key, holds: completion.holds, detail: completion.detail });
-      if (!completion.holds) {
-        throw new Stop('unresolvable', { code: 'milestone_incomplete', message: `milestone ${milestone.key} did not complete: ${completion.detail}` });
-      }
       done.add(milestone.key);
     }
 
     // A plan without a terminal milestone is done when every milestone is.
     healerBelievedDone = { believed: true, atStep: actions, stepKey: lastStepKey };
-    events.emit('healer_done', { believed: true, atStep: actions, stepKey: lastStepKey, detail: 'every milestone complete' });
+    events.emit('healer_done', { believed: true, atStep: actions, stepKey: lastStepKey, detail: 'every milestone ran' });
     return finish('completed', null);
   } catch (error) {
-    const stop = error instanceof Stop ? error : new Stop('environment', classify(error));
-    events.emit('stopped', { outcome: stop.outcome, code: stop.reason.code, message: stop.reason.message, stepKey: lastStepKey });
-    return finish(stop.outcome, stop.reason);
+    const stop = classify(error);
+    events.emit('stopped', { outcome: stop.runOutcome, code: stop.code, message: stop.message, stepKey: lastStepKey });
+    return finish(stop.runOutcome, { code: stop.code, message: stop.message });
   } finally {
     page.off('requestfailed', onRequestFailed);
   }
