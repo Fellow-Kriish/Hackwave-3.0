@@ -56,6 +56,12 @@ Each act's cache state is the one the act before it left.
 
 Act 3 runs after act 2 because v2-broken shares v2's UI: act 2's cache fits it, so the RED is the oracle alone.
 
+`pnpm demo --same-url` runs the same acts at a single address instead: it deploys Version A there, runs act 1, then
+deploys Version B over it at the same URL and runs the same test unchanged (then B with the bug, then B again). It needs
+no running shops, only a built one. Every AMBER report, and the console, opens with **What changed**: the redesign in
+plain words (renamed and moved controls, new required fields, a new order, rebuilt steps), read off what the run saw,
+not written by a model. `demo-menu.bat` puts all of this behind one double-click menu.
+
 Before going on stage: `pnpm engine doctor` passes, the three shops are up, and nothing on the demo laptop has been
 upgraded since the freeze. Options: `--with-wrong-total` adds a fifth act on the reserve bug (order saved at ₹999),
 `--headless` drops the window, `--slow-mo <ms>` changes the pace, `--keep-caches` leaves act 4's caches in place.
@@ -142,6 +148,46 @@ and `config-used.json`. Exit codes: 0 GREEN or AMBER, 1 RED, 2 GREY, 3 setup err
 
 The console's final block tells the same story in short, including the PR text for AMBER and the hypothesis for RED.
 
+## The web app: type a goal, watch it test
+
+```sh
+pnpm ui                       # http://localhost:4321 opens in your browser; Ctrl+C stops it
+pnpm ui --headless --port 5000 --no-open
+```
+
+A tester types what a user wants to do ("Complete checkout with a valid credit card"), picks which version of the shop to
+test, and presses **Run test**. A browser window shows every click (slowMo 300) while the page streams what the AI is
+doing: the plan, each step, every heal and re-plan, and the verifier's three checks. Each run ends in a card with the
+verdict, the summary, what changed in the app (for AMBER), what the healer believed versus what the verifier found, the
+likely cause (for a real bug), and a link to the full report.
+
+**Guided demo** runs the whole story from the one typed goal, at one address: Version A from scratch (the AI plans the
+test from the sentence), then Version B deployed to the same address (it heals and says what changed), then Version B
+with the backend bug (the page says "confirmed", the store disagrees: RED), then Version B again (no AI needed).
+
+The app runs its own shop on a free port and redeploys it when the version changes, so `pnpm shop` is not needed. A goal
+that reads the same as one under `intents/` (the default, from `intents/checkout.json`) replays the recorded AI answers:
+no internet, no key, the same run every time. Any other sentence is planned by the live model (`LLM_API_KEY` in `.env`);
+"Use the live AI" forces that for the recorded goal too, and "Start from scratch" forgets what was learned for the goal.
+The server listens on 127.0.0.1 only, runs one test at a time, accepts runs only from its own page, and serves files from
+`runs/` and nowhere else. In `demo-menu.bat` it is option U.
+
+## Type a goal and test it
+
+```sh
+pnpm engine try "Complete checkout with a valid credit card" --target http://localhost:5172 --headed
+pnpm engine try "Buy the City Sneaker and pay with a credit card"          # v1 by default
+```
+
+The engine builds a test around the sentence and runs it at once: the planner plans it from scratch on the live page,
+the ladder heals what it must, and the verifier checks the outcome. The test values (card, address, phone) come from
+`intents/checkout.json` (`--data` picks another intent). The success check is written by code, never by a model: exactly
+one new order with the product (the one the goal names, if the shop sells it, else Trail Runner), its catalogue price,
+and the card's last four digits, the order's id on the page, and no error alert. A sentence nobody typed before has no
+recording, so `try` calls the model live: it needs `LLM_API_KEY` in `.env` (the recorded demo does not). Typed goals are
+scratch tests under `runs/typed/`; `--save` keeps one as `intents/<id>.json`, a test like any other. In
+`demo-menu.bat` it is option T.
+
 ## Intents: lint and init
 
 ```sh
@@ -169,15 +215,22 @@ visible, enabled, role match, still in its landmark) before anything is clicked 
 | Rung | How | Model |
 | --- | --- | --- |
 | 1 | the cached locator for the step (or the plan's own target the first time) | none |
-| 2 | similarity: 0.8 × name (step name, synonyms, cached name) + 0.1 × same landmark + 0.1 × same nearby headings and labels; accepted at ≥ 0.85 and ≥ 0.15 ahead of the next candidate | none |
+| 2 | similarity: 0.8 × name (step name, synonyms, cached name) + 0.1 × same landmark + 0.1 × same nearby headings and labels; accepted at ≥ 0.85 and ≥ 0.15 ahead of the next candidate. Prices and bracketed counts may differ ("Pay ₹1,299" = "Pay ₹999", "Cart (1)" = "Cart (3)"), other numbers may not ("Size 9" ≠ "Size 10"); the thresholds are checked against labelled pairs in `similarity.calibration.test.ts` | none |
 | 3 | one fast-model call per screen picks from the top 8 candidates for every step still unresolved there; "none" is a valid answer | fast tier |
 | 4 | screenshot and vision: designed, flag `ladder.visionEnabled`, off and not built | — |
 | 5 | milestone re-plan: from the goal, the milestone, the current screen, the steps done and why the step failed, the strong model rewrites the rest of that milestone only (and may say it continues on the next screen, or that there is no way) | strong tier |
 
 A scope named after an input (the product card) is never left: if it is missing, rungs 2 and 3 guess nothing. Heals
 never land on an element an earlier step already used on the same screen (that would repeat the step, e.g. add the
-product twice). A heal that acted without effect is rolled back and goes one rung up. A click whose only effect is a
-validation alert counts as no progress, so a new required field sends the milestone to rung 5.
+product twice), and outside the terminal milestone never on a control that commits the goal (pay, place, confirm or
+complete an order, buy); re-plans and step expansions are held to the same rule. A heal that acted without effect is
+rolled back and goes one rung up. A click whose only effect is a validation alert counts as no progress, so a new
+required field sends the milestone to rung 5; a click that makes the app save something (a successful POST, PUT,
+PATCH or DELETE to the app) counts as progress even when the page barely changes. Typed values are read back allowing
+for the app's formatting (spaces in a card number, a phone mask).
+
+A healed name keeps its price or count as `{n}` when that still names exactly one control, so a cached
+`button "Pay ₹{n}"` survives a price change.
 
 Rung 5 runs at most 2 times per milestone (`budgets.maxReplansPerMilestone`). A re-plan that starts with the step that
 just failed, or repeats the old steps, is a loop and stops the run RED (unresolvable); so does a re-plan that finds no

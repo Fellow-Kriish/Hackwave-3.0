@@ -105,7 +105,8 @@ describe('terminal rule', () => {
       await new Promise((resolve) => server.close(resolve));
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+    // It launches its own browser: under a full parallel test run that alone can take seconds.
+  }, 30_000);
 });
 
 describe('on a real page', () => {

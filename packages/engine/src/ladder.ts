@@ -2,10 +2,11 @@ import { performance } from 'node:perf_hooks';
 import type { Step, Validation } from '@hackwave/contracts';
 import type { Locator, Page } from 'playwright';
 import type { EngineConfig } from './config';
+import { looksLikeCommit } from './commit';
 import { describeElement, type Container, type Fingerprint } from './fingerprint';
 import type { CachedLocator, LocatorCacheEntry } from './locator-cache';
 import { buildLocator, concreteTarget, nameOption, type ConcreteTarget } from './resolve';
-import { nameSimilarity, setOverlap } from './similarity';
+import { nameSimilarity, setOverlap, templateVolatileNumbers } from './similarity';
 
 type AriaRole = Parameters<Page['getByRole']>[0];
 
@@ -24,9 +25,16 @@ export interface Expectation {
   target: ConcreteTarget;
   cached: LocatorCacheEntry | null;
   hint: string | null;
+  /** False outside the terminal milestone: heals never land on a control that commits the goal ("Pay ₹1,299"). */
+  commitAllowed: boolean;
 }
 
-export function expectationFor(step: Step, entry: LocatorCacheEntry | undefined, inputs: Readonly<Record<string, string>>): Expectation | null {
+export function expectationFor(
+  step: Step,
+  entry: LocatorCacheEntry | undefined,
+  inputs: Readonly<Record<string, string>>,
+  commitAllowed = true,
+): Expectation | null {
   if (!('target' in step) || !step.target) return null;
   const target = concreteTarget(step.target, inputs);
   const names = [target.name, ...step.target.synonyms, ...(entry ? [entry.fingerprint.name] : [])].filter((name, index, all) => name && all.indexOf(name) === index);
@@ -42,7 +50,22 @@ export function expectationFor(step: Step, entry: LocatorCacheEntry | undefined,
     target,
     cached: entry ?? null,
     hint: step.target.hint ?? null,
+    commitAllowed,
   };
+}
+
+/**
+ * Rung 2's score for one candidate: 0.8 × the best name similarity (step name, synonyms, cached name), plus 0.1
+ * when it sits in the landmark the element was cached in, plus 0.1 × the overlap of nearby headings and labels.
+ * With no cache entry, the name alone. Calibrated against labelled pairs in similarity.calibration.test.ts.
+ */
+export function similarityScore(candidate: Fingerprint, expectation: Pick<Expectation, 'names' | 'cached'>): number {
+  const name = Math.max(0, ...expectation.names.map((expected) => nameSimilarity(expected, candidate.name)));
+  const remembered = expectation.cached?.fingerprint;
+  if (!remembered) return Math.round(name * 1000) / 1000;
+  const sameLandmark = remembered.landmark && candidate.landmark && remembered.landmark.role === candidate.landmark.role ? 1 : 0;
+  const siblings = setOverlap(remembered.siblingText, candidate.siblingText);
+  return Math.round((0.8 * name + 0.1 * sameLandmark + 0.1 * siblings) * 1000) / 1000;
 }
 
 export interface ScoredCandidate {
@@ -123,6 +146,19 @@ export function createLadder(options: LadderOptions) {
   const { page, inputs, valueOwners, ladder } = options;
 
   /**
+   * The locator to cache for a target that matched: input names become nameRef, and a price or count in the name
+   * becomes {n} when the templated name still matches exactly one element, so "Pay ₹1,299" survives a price change.
+   */
+  async function cacheable(target: ConcreteTarget, expectation: Expectation): Promise<CachedLocator> {
+    const cached = toCached(target, expectation, valueOwners);
+    if (cached.name === undefined) return cached;
+    const templated = templateVolatileNumbers(cached.name);
+    if (templated === cached.name) return cached;
+    const { locator } = buildLocator(page, { ...target, name: templated });
+    return (await locator.count()) === 1 ? { ...cached, name: templated } : cached;
+  }
+
+  /**
    * Rung 1: the cached locator, or the step's own target when there is none yet. Validated objectively,
    * including that the element is still in the landmark it was cached in.
    */
@@ -171,21 +207,12 @@ export function createLadder(options: LadderOptions) {
       reason,
       locator: ok ? locator : null,
       target: ok ? target : null,
-      cachedLocator: ok ? (expectation.cached?.locator ?? toCached(target, expectation, valueOwners)) : null,
+      cachedLocator: ok ? (expectation.cached?.locator ?? (await cacheable(target, expectation))) : null,
       fingerprint,
       validation,
       score: ok ? 1 : null,
       ms: Math.round(performance.now() - started),
     };
-  }
-
-  function scoreOf(candidate: { name: string; fingerprint: Fingerprint }, expectation: Expectation): number {
-    const name = Math.max(0, ...expectation.names.map((expected) => nameSimilarity(expected, candidate.name)));
-    const remembered = expectation.cached?.fingerprint;
-    if (!remembered) return Math.round(name * 1000) / 1000;
-    const sameLandmark = remembered.landmark && candidate.fingerprint.landmark && remembered.landmark.role === candidate.fingerprint.landmark.role ? 1 : 0;
-    const siblings = setOverlap(remembered.siblingText, candidate.fingerprint.siblingText);
-    return Math.round((0.8 * name + 0.1 * sameLandmark + 0.1 * siblings) * 1000) / 1000;
   }
 
   /** Would this candidate be the element a target names? Same role and name, in the same named container. */
@@ -222,11 +249,15 @@ export function createLadder(options: LadderOptions) {
       for (const locator of all) {
         const { fingerprint, container } = await describeElement(locator, expectation.role);
         if (!fingerprint.name) continue;
-        found.push({ id: '', locator, name: fingerprint.name, fingerprint, container, inScope: scoped, score: scoreOf({ name: fingerprint.name, fingerprint }, expectation) });
+        found.push({ id: '', locator, name: fingerprint.name, fingerprint, container, inScope: scoped, score: similarityScore(fingerprint, expectation) });
       }
       return found;
     };
-    const fresh = (found: ScoredCandidate[]) => found.filter((candidate) => !avoid.some((target) => isSameElement(candidate, target, expectation)));
+    const fresh = (found: ScoredCandidate[]) =>
+      found.filter(
+        (candidate) =>
+          !avoid.some((target) => isSameElement(candidate, target, expectation)) && (expectation.commitAllowed || !looksLikeCommit(candidate.name)),
+      );
     let candidates = fresh(await collect(root, inScope));
     if (candidates.length === 0 && inScope && !expectation.scope?.required) candidates = fresh(await collect(page, false));
     candidates.sort((a, b) => b.score - a.score);
@@ -257,7 +288,7 @@ export function createLadder(options: LadderOptions) {
         reason: ok ? `${reasonPrefix}: ${target.role} "${target.name}"` : `${reasonPrefix}: ${target.role} "${target.name}" failed validation`,
         locator: ok ? locator : null,
         target: ok ? target : null,
-        cachedLocator: ok ? toCached(target, expectation, valueOwners) : null,
+        cachedLocator: ok ? await cacheable(target, expectation) : null,
         fingerprint: candidate.fingerprint,
         validation,
         score: candidate.score,

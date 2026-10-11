@@ -30,9 +30,9 @@ export function describeTarget(target: ConcreteTarget): string {
 
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** A whole-name pattern: the name exactly, with each "{n}" standing for any whole number ("Cart ({n})"). */
+/** A whole-name pattern: the name exactly, with each "{n}" standing for any number, separators included ("1,299"). */
 export function namePattern(name: string): RegExp {
-  return new RegExp(`^${name.split('{n}').map(escapeRegExp).join('\\d+')}$`);
+  return new RegExp(`^${name.split('{n}').map(escapeRegExp).join('\\d+(?:[.,]\\d+)*')}$`);
 }
 
 /** getByRole options: an exact name, or the whole-name pattern when the name carries {n}. */

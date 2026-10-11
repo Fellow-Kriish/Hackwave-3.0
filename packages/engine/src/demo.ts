@@ -7,7 +7,7 @@ import { markdownToHtml } from './html';
 import { findRepoRoot } from './paths';
 import { banner } from './report';
 import { runIntent, SetupError } from './run';
-import { resetStore, shopProblem, startPrivateShop, type PrivateShop } from './shop-process';
+import { freePort, resetStore, shopProblem, startPrivateShop, type PrivateShop } from './shop-process';
 import { captureCaches, putBackCaches, restoreSnapshot } from './snapshot';
 
 /** The caches as act 1 leaves them: the v1 plan built from the goal, and v1-warm locators. */
@@ -17,6 +17,14 @@ export const DEMO_BUDGET_MS = 240_000;
 const DEMO_INTENT = join('intents', 'checkout.json');
 
 type Target = 'v1' | 'v2' | 'v2-broken' | 'v2-wrong-total';
+
+/** What the audience is told is now deployed, in same-address mode. */
+const VERSION_LABEL: Record<Target, string> = {
+  v1: 'Version A (v1)',
+  v2: 'Version B (v2, the redesign)',
+  'v2-broken': 'Version B with a backend bug (v2-broken: confirms orders, saves nothing)',
+  'v2-wrong-total': 'Version B with a pricing bug (v2-wrong-total: saves the wrong total)',
+};
 
 export interface Act {
   act: number;
@@ -78,6 +86,11 @@ export interface DemoOptions {
   /** Leave the caches as act 4 left them, instead of putting them back. */
   keepCaches: boolean;
   withWrongTotal: boolean;
+  /**
+   * Run every act against one address, deploying the next version to it between acts (A, then B, then B with the
+   * bug), instead of the three shops on their own ports. Needs no running shops, only a built one.
+   */
+  sameUrl: boolean;
   /** Laid over process.env for every act: LLM_MODE=replay, and for the replay-complete fixture no keys at all. */
   envOverride: Record<string, string | undefined>;
   /** Print nothing: the eval runner reports. */
@@ -171,8 +184,10 @@ export async function runDemo(options: DemoOptions): Promise<DemoResult> {
     if (port === undefined) throw new SetupError(`no port for ${target} in engine.config.json`);
     return `http://localhost:${port}`;
   };
-  const problemsBefore = (await Promise.all(['v1', 'v2', 'v2-broken'].map((target) => shopProblem(originOf(target), target)))).filter((problem) => problem !== null);
-  if (problemsBefore.length > 0) throw new SetupError(`the demo needs the three shops:\n  ${problemsBefore.join('\n  ')}`);
+  if (!options.sameUrl) {
+    const problemsBefore = (await Promise.all(['v1', 'v2', 'v2-broken'].map((target) => shopProblem(originOf(target), target)))).filter((problem) => problem !== null);
+    if (problemsBefore.length > 0) throw new SetupError(`the demo needs the three shops:\n  ${problemsBefore.join('\n  ')}`);
+  }
 
   const acts = options.withWrongTotal ? [...ACTS, WRONG_TOTAL_ACT] : [...ACTS];
   const saved = captureCaches(root);
@@ -180,18 +195,31 @@ export async function runDemo(options: DemoOptions): Promise<DemoResult> {
   const folder = join(root, 'runs', `demo-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}`);
   const results: ActResult[] = [];
   let shop: PrivateShop | null = null;
+  // Same-address mode: one URL for every act; a new version is deployed to it between acts, like a release.
+  const samePort = options.sameUrl ? await freePort() : null;
+  let deployed: Target | null = null;
   try {
     const restored = restoreSnapshot(root, DEMO_SNAPSHOT);
     log(dim(`demo: caches restored from runs/snapshots/${DEMO_SNAPSHOT} (${restored.join(', ')}); each store is reset before its act`));
     for (const act of acts) {
       let origin: string;
-      if (act.target === 'v2-wrong-total') {
+      let deployedNow = false;
+      if (samePort !== null) {
+        if (deployed !== act.target) {
+          if (shop) await shop.stop();
+          shop = await startPrivateShop(root, act.target, samePort);
+          deployed = act.target;
+          deployedNow = true;
+        }
+        origin = (shop as PrivateShop).origin;
+      } else if (act.target === 'v2-wrong-total') {
         shop = await startPrivateShop(root, act.target);
         origin = shop.origin;
       } else origin = originOf(act.target);
       await resetStore(origin);
       log('');
-      log(cyan(bold(`━━━━ Act ${act.act} of ${acts.length} · ${act.target} · ${act.title} ━━━━`)));
+      if (deployedNow) log(yellow(bold(`▶ Deployed ${VERSION_LABEL[act.target]} to ${origin} (the same address every act uses)`)));
+      log(cyan(bold(`━━━━ Act ${act.act} of ${acts.length} · ${options.sameUrl ? `${origin} now runs ${act.target}` : act.target} · ${act.title} ━━━━`)));
       if (options.cues) log(yellow(`say: "${act.cue}"`));
       const actStarted = Date.now();
       const result = await runIntent({
@@ -204,7 +232,8 @@ export async function runDemo(options: DemoOptions): Promise<DemoResult> {
         envOverride: options.envOverride,
       });
       results.push({ act, verdict: result.verdict, runDir: result.runDir, ms: Date.now() - actStarted, problems: actProblems(act, result.verdict, result.runDir) });
-      if (shop) {
+      // The act-5 private shop goes; in same-address mode the shop stays until the next version replaces it.
+      if (shop && samePort === null) {
         await shop.stop();
         shop = null;
       }

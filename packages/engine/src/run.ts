@@ -17,7 +17,7 @@ import { chromium } from 'playwright';
 import { sameOrigin } from './allowlist';
 import { loadConfig } from './config';
 import { printEvent } from './console';
-import { EventLog } from './events';
+import { EventLog, type EngineEvent } from './events';
 import { execute, type ExecutionResult, type ExecutionSnapshot } from './executor';
 import { describeTier, LlmAdapter, loadPrompt, readManifest, resolveLlmSettings } from './llm';
 import { loadIntent, loadPlan } from './load';
@@ -27,7 +27,7 @@ import { cacheablePlan, loadCachedPlan, planCacheFile, savePlanCache } from './p
 import { createPlanner, planPromptHash } from './planner';
 import { createExplainer, type Explanation } from './explain';
 import { markdownToHtml } from './html';
-import { banner, printFinalBlock, renderReport, type LocatorChange, type ReportContext } from './report';
+import { banner, printFinalBlock, renderReport, summary, whatChanged, type LocatorChange, type ReportContext } from './report';
 import { createReplanner } from './replanner';
 import { createRung3Picker } from './resolver';
 import { createRunDir } from './run-dir';
@@ -57,12 +57,19 @@ export interface RunOptions {
   afterAction?: (stepKey: string) => Promise<void>;
   /** Variables laid over process.env when choosing the model (the provider-switch eval). */
   envOverride?: Record<string, string | undefined>;
+  /** Every event as it happens (the web app streams them); the JSON line is on disk first. */
+  onEvent?: (event: EngineEvent) => void;
 }
 
 export interface RunResult {
   verdict: Verdict;
   runDir: string;
   planSource: PlanSourceKind;
+  /** The report's one sentence, and for AMBER its plain-English "What changed". */
+  summary: string;
+  whatChanged: string[];
+  /** The RED hypothesis, or why there is none; null when none was asked for. */
+  explanation: Explanation | null;
 }
 
 /** Grace on top of the run budget before the watchdog declares a hang. */
@@ -159,6 +166,7 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
 
   const events = new EventLog(join(runDir, 'events.jsonl'));
   if (!options.quiet) events.onEvent(printEvent);
+  if (options.onEvent) events.onEvent(options.onEvent);
   const timings = new Timings();
   const startedAt = new Date().toISOString();
   const runStartedMs = Date.now();
@@ -370,7 +378,14 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
       }
       rmSync(join(runDir, 'video-raw'), { recursive: true, force: true });
     }
-    return { verdict, runDir, planSource };
+    return {
+      verdict,
+      runDir,
+      planSource,
+      summary: summary(verdict, reportContext),
+      whatChanged: verdict.kind === 'ui_drift' ? whatChanged(verdict, reportContext) : [],
+      explanation,
+    };
   } finally {
     await browser.close();
   }

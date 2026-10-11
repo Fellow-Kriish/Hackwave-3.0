@@ -1,6 +1,7 @@
 import { sameTarget, StepSchema, type HealerIntent, type Milestone, type ReplanEvent, type Step } from '@hackwave/contracts';
 import type { Page } from 'playwright';
 import { z } from 'zod';
+import { looksLikeCommit } from './commit';
 import type { LlmAdapter, PromptFile } from './llm';
 import { milestoneLine } from './planner';
 import { describeStep, stepIssues } from './step-rules';
@@ -73,9 +74,10 @@ export function createReplanner(options: ReplannerOptions): Replanner {
           if (milestone.terminal && last && !value.more && !leaves) issue(['steps'], 'the terminal milestone must end with the click that commits the goal');
           // Terminal protection: the committing click never runs from another milestone, re-planned or not.
           const commit = request.commit;
-          if (!milestone.terminal && commit) {
+          if (!milestone.terminal) {
             value.steps.forEach((step, at) => {
-              if (sameTarget(step, commit)) issue(['steps', at], 'this is the click that commits the goal; it belongs only to the terminal milestone');
+              const committing = (commit && sameTarget(step, commit)) || ((step.action === 'click' || step.action === 'press') && looksLikeCommit(step.target?.name));
+              if (committing) issue(['steps', at], 'this is the click that commits the goal; it belongs only to the terminal milestone');
             });
           }
         });

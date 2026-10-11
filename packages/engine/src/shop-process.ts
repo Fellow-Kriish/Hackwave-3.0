@@ -38,7 +38,7 @@ export async function shopProblem(origin: string, version: string): Promise<stri
   }
 }
 
-function freePort(): Promise<number> {
+export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.once('error', reject);
@@ -49,10 +49,11 @@ function freePort(): Promise<number> {
   });
 }
 
-export async function startPrivateShop(root: string, version: string): Promise<PrivateShop> {
+/** A shop of this version on its own store; on the given port (a redeploy at the same address) or a free one. */
+export async function startPrivateShop(root: string, version: string, port?: number): Promise<PrivateShop> {
   const shopDir = join(root, 'apps', 'shop');
   if (!existsSync(join(shopDir, 'dist', 'index.html'))) throw new Error('the shop is not built; run pnpm shop (or pnpm --filter @hackwave/shop build) first');
-  const port = await freePort();
+  port ??= await freePort();
   const dataDir = mkdtempSync(join(tmpdir(), 'hackwave-shop-'));
   const child = spawn(process.execPath, ['--import', 'tsx', join('server', 'index.ts')], {
     cwd: shopDir,

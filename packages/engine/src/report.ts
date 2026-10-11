@@ -113,6 +113,58 @@ export function summary(verdict: Verdict, context: Pick<ReportContext, 'planSour
   }
 }
 
+/** A name as people read it: a changing count or price shows as "…" rather than {n}. */
+const readable = (name: string) => name.replace(/\{n\}/g, '…');
+
+/**
+ * For AMBER, in plain words: what changed in the app, read off what the run saw (renames, moves, new fields, a new
+ * order, rebuilt steps). No model writes it, so nothing in it can be made up.
+ */
+export function whatChanged(verdict: Verdict, context: Pick<ReportContext, 'planBefore' | 'started' | 'skipped'>): string[] {
+  const lines: string[] = [];
+  for (const heal of verdict.heals) {
+    const from = heal.from;
+    if (!from) continue;
+    if (heal.moved || locatorText(from) === locatorText(heal.to)) {
+      lines.push(`The ${heal.to.role} "${readable(heal.to.name)}" moved to another part of the page${heal.moved ? ` (${heal.moved})` : ''}.`);
+    } else {
+      lines.push(`The ${from.role} "${readable(from.name)}" is now called "${readable(heal.to.name)}"${heal.to.role === from.role ? '' : ` and is now a ${heal.to.role}`}.`);
+    }
+  }
+  const before = context.planBefore;
+  if (before) {
+    const inPlanOrder = before.milestones.map((milestone) => milestone.key).filter((key) => context.started.includes(key));
+    if (inPlanOrder.join() !== context.started.join()) lines.push(`The flow's order changed: it now goes ${context.started.join(' → ')}; the plan said ${inPlanOrder.join(' → ')}.`);
+  }
+  if (context.skipped.length > 0) lines.push(`${context.skipped.join(', ')} ${context.skipped.length === 1 ? 'was' : 'were'} already done when the run got there.`);
+  const filledBefore = new Set((before?.milestones ?? []).flatMap((milestone) => milestone.steps.flatMap((step) => (step.action === 'fill' || step.action === 'select' ? [step.inputRef] : []))));
+  for (const replan of verdict.replans) {
+    for (const step of replan.newSteps) {
+      if ((step.action === 'fill' || step.action === 'select') && !filledBefore.has(step.inputRef)) {
+        lines.push(`The page now asks for a new field, ${step.target.role} "${readable(step.target.name ?? step.inputRef)}" (filled from ${step.inputRef}).`);
+      }
+    }
+    lines.push(`The ${replan.milestoneKey} part of the flow had to be rebuilt from the goal${replan.rationale ? `: ${replan.rationale}` : '.'}`);
+  }
+  return lines;
+}
+
+function whatChangedSection(verdict: Verdict, context: ReportContext): string[] {
+  if (verdict.kind !== 'ui_drift') return [];
+  const lines = whatChanged(verdict, context);
+  if (lines.length === 0) return [];
+  return [
+    '## What changed',
+    '',
+    'The app changed since these steps were recorded. In plain words:',
+    '',
+    ...lines.map((line) => `- ${line}`),
+    '',
+    'None of it broke the goal: the order reached the system of record with the right item, total and card.',
+    '',
+  ];
+}
+
 function notionsOfDone(verdict: Verdict): string[] {
   const failing = failingCheck(verdict);
   return [
@@ -243,12 +295,17 @@ export function planDiff(
 }
 
 /** A pull-request description the engineer can paste: what changed, how it was found, how to check it. */
-export function prBlock(verdict: Verdict, context: Pick<ReportContext, 'intentFile' | 'locatorsFile' | 'planFile'>): string[] {
+export function prBlock(
+  verdict: Verdict,
+  context: Pick<ReportContext, 'intentFile' | 'locatorsFile' | 'planFile'> & Partial<Pick<ReportContext, 'planBefore' | 'started' | 'skipped'>>,
+): string[] {
+  const changes = whatChanged(verdict, { planBefore: context.planBefore ?? null, started: context.started ?? [], skipped: context.skipped ?? [] });
   return [
     `## Heal UI drift in ${verdict.intentId}`,
     '',
     `The app at ${verdict.target} changed. Run \`${verdict.runId}\` healed the test and the oracle passed on the system of record (state delta, UI-to-state binding, no error alerts), so these changes are checked against the outcome, not guessed.`,
     '',
+    ...(changes.length > 0 ? ['**What changed**', '', ...changes.map((line) => `- ${line}`), ''] : []),
     ...(verdict.heals.length > 0
       ? [
           `**Locators** (\`${context.locatorsFile}\`)`,
@@ -339,6 +396,7 @@ export function renderReport(verdict: Verdict, context: ReportContext): string {
     '',
     `> ${summary(verdict, context)}`,
     '',
+    ...whatChangedSection(verdict, context),
     ...(realBug ? notionsOfDone(verdict) : []),
     '## Config in force',
     '',
@@ -394,6 +452,13 @@ export function printFinalBlock(verdict: Verdict, context: ReportContext): void 
   log('');
   log(color(bold(`━━ ${banner(verdict)} ━━`)));
   log(color(`  ${summary(verdict, context)}`));
+  if (verdict.kind === 'ui_drift') {
+    const changes = whatChanged(verdict, context);
+    if (changes.length > 0) {
+      log(yellow('  what changed:'));
+      for (const line of changes) log(yellow(`    · ${line}`));
+    }
+  }
   for (const reason of verdict.reasons) log(dim(`  ${reason.code}: ${reason.message}`));
   log(`  ${healerLine(verdict)} · verifier: ${verdict.color}`);
   if (verdict.oracle.finalHeading) log(dim(`  final page: "${verdict.oracle.finalHeading}"`));

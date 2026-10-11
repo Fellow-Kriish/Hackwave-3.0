@@ -14,7 +14,7 @@ import type { FetchLike } from './llm/providers';
 import { resolveLlmSettings } from './llm/settings';
 import { loadIntent } from './load';
 import { findRepoRoot } from './paths';
-import { lineDiff, planDiff, prBlock, renderReport, summary, type ReportContext } from './report';
+import { lineDiff, planDiff, prBlock, renderReport, summary, whatChanged, type ReportContext } from './report';
 import { valueOwnersOf } from './tree';
 
 const root = findRepoRoot();
@@ -193,6 +193,30 @@ describe('report pieces', () => {
     expect(summary(broken(), { planSource: 'cache' })).toBe(
       'The page said "Thanks! Order ORD-4821 is on its way", but the system of record disagrees: expected 1 new record(s) in orders, found 0 after waiting 5000 ms (baseline 0).',
     );
+  });
+
+  it('says what changed in plain words, from what the run saw', () => {
+    const validation = { unique: true, visible: true, enabled: true, roleMatch: true, inLandmark: true };
+    const amber = verdict({
+      color: 'AMBER',
+      kind: 'ui_drift',
+      heals: [
+        { runId: 'r', milestoneKey: 'cart', stepKey: 'cart.add', from: { role: 'button', name: 'Add to cart' }, to: { role: 'button', name: 'Add to cart' }, rung: 2, reason: 'x', validation, ms: 1, moved: 'from main to region "New arrivals"' },
+        { runId: 'r', milestoneKey: 'cart', stepKey: 'cart.open', from: { role: 'button', name: 'Cart ({n})' }, to: { role: 'button', name: 'Your bag' }, rung: 3, reason: 'x', validation, ms: 1 },
+      ],
+      replans: [{ milestoneKey: 'payment', reason: 'r', oldSteps: [], newSteps: [fill('payment.phone', 'Phone', 'shipping.phone'), click('payment.continue', 'Continue to payment')], attempt: 1, rationale: 'the page asks for a phone number first.' }],
+    });
+    const before = plan([
+      { key: 'shipping', steps: [fill('shipping.name', 'Full name', 'shipping.name')] },
+      { key: 'payment', steps: [fill('payment.card-number', 'Card number', 'card.number')] },
+    ]);
+    expect(whatChanged(amber, { planBefore: before, started: ['payment', 'shipping'], skipped: [] })).toEqual([
+      'The button "Add to cart" moved to another part of the page (from main to region "New arrivals").',
+      'The button "Cart (…)" is now called "Your bag".',
+      "The flow's order changed: it now goes payment → shipping; the plan said shipping → payment.",
+      'The page now asks for a new field, textbox "Phone" (filled from shipping.phone).',
+      'The payment part of the flow had to be rebuilt from the goal: the page asks for a phone number first.',
+    ]);
   });
 
   it('puts both notions of done and the hypothesis at the top of a RED report', () => {

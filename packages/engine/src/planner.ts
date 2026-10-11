@@ -12,6 +12,7 @@ import {
 } from '@hackwave/contracts';
 import type { Page } from 'playwright';
 import { z } from 'zod';
+import { looksLikeCommit } from './commit';
 import type { LlmAdapter, PromptFile } from './llm';
 import { describeStep, stepIssues } from './step-rules';
 import { screenTree, valueOwnersOf } from './tree';
@@ -132,6 +133,13 @@ export function createPlanner(options: PlannerOptions): PlanSource {
               issue(['milestones', index, 'milestone'], `must be "${expected.key}" (a milestone key from the list, not a step key): expand milestones in the order given`);
             }
             for (const found of stepIssues(milestone.steps, rules, seen)) issue(['milestones', index, 'steps', ...found.path], found.message);
+            if (!expected.terminal) {
+              milestone.steps.forEach((step, stepIndex) => {
+                if ((step.action === 'click' || step.action === 'press') && looksLikeCommit(step.target?.name)) {
+                  issue(['milestones', index, 'steps', stepIndex], `"${step.target?.name}" looks like the click that commits the goal; it belongs only to the terminal milestone`);
+                }
+              });
+            }
             // Empty steps close a milestone with nothing left to do: a started one, or one whose work a later
             // milestone in this same reply covers. Never the terminal one, and never to skip a screen not seen yet.
             if (milestone.steps.length === 0) {

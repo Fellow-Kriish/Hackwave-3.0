@@ -15,7 +15,7 @@ import {
   type RungHistogram,
   type Step,
 } from '@hackwave/contracts';
-import { errors, type Locator, type Page, type Request } from 'playwright';
+import { errors, type Locator, type Page, type Request, type Response as PageResponse } from 'playwright';
 import { checkProgress, perform } from './act';
 import { checkAllowed, sameOrigin } from './allowlist';
 import type { PageState } from './aria';
@@ -199,6 +199,15 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
   };
   page.on('requestfailed', onRequestFailed);
 
+  /** Same-site requests that changed data and succeeded ("POST /api/cart"), in order: a progress signal for clicks. */
+  const appRequests: string[] = [];
+  const onResponse = (response: PageResponse) => {
+    const method = response.request().method();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS' || response.status() >= 400 || !sameOrigin(response.url(), origin)) return;
+    appRequests.push(`${method} ${new URL(response.url()).pathname}`);
+  };
+  page.on('response', onResponse);
+
   const finish = (outcome: RunOutcome, reason: Reason | null): ExecutionResult => ({
     outcome,
     reason,
@@ -238,7 +247,10 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
   async function screenKey(): Promise<string> {
     const dialogs: string[] = [];
     for (const dialog of await page.getByRole('dialog').filter({ visible: true }).all()) dialogs.push(await accessibleName(dialog));
-    return `${new URL(page.url()).pathname}|${dialogs.sort().join(',')}`;
+    // The main heading too: a single-page app changes screens without changing the URL.
+    const headings = page.getByRole('heading', { level: 1 }).filter({ visible: true });
+    const heading = (await headings.count()) > 0 ? await headings.first().innerText({ timeout: 1000 }).catch(() => '') : '';
+    return `${new URL(page.url()).pathname}|${dialogs.sort().join(',')}|${heading.trim()}`;
   }
 
   /**
@@ -307,7 +319,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
 
     const batch: Rung3Request[] = [{ expectation, purpose: purposeOf(step, milestone), candidates }];
     for (const later of milestone.steps.slice(index + 1)) {
-      const laterExpectation = expectationFor(later, cacheEntryFor(later), inputs);
+      const laterExpectation = expectationFor(later, cacheEntryFor(later), inputs, milestone.terminal);
       if (!laterExpectation || preResolved.has(later.key) || attempts(later.key) >= budgets.maxRung3AttemptsPerStepPerScreen) continue;
       if ((await ladder.rung1(laterExpectation, 0)).ok) continue;
       const laterRung2 = await ladder.rung2(laterExpectation, actedHere());
@@ -335,7 +347,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
    * milestone re-plan) in the milestone loop. Heals never land on an element already acted on, on this screen.
    */
   async function resolveTarget(milestone: Milestone, index: number, step: Step, escalateFrom: ConcreteTarget | null = null): Promise<Resolution> {
-    const expectation = expectationFor(step, cacheEntryFor(step), inputs);
+    const expectation = expectationFor(step, cacheEntryFor(step), inputs, milestone.terminal);
     if (!expectation) throw new OutcomeError('unresolvable', 'no_target', `${step.key} has no target to resolve`);
     const failures: string[] = [];
     if (escalateFrom) {
@@ -371,6 +383,11 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       return;
     }
     const before = expectation.cached ? (concreteFromCached(expectation.cached.locator, inputs) ?? expectation.target) : expectation.target;
+    const fromText = describeTarget(before);
+    const toText = describeTarget(outcome.target);
+    // Same locator, new place: the heal is the landmark move, so say that rather than "X became X".
+    const movedTo =
+      fromText === toText && expectation.cached ? `from ${describeLandmark(expectation.cached.fingerprint)} to ${describeLandmark(outcome.fingerprint)}` : null;
     const heal: HealEvent = {
       runId: input.runId,
       milestoneKey: milestone.key,
@@ -381,15 +398,11 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       reason: [...resolution.failures, outcome.reason].join('; '),
       validation: outcome.validation,
       ms: outcome.ms,
+      ...(movedTo ? { moved: movedTo } : {}),
     };
     heals.push(heal);
     locators.set(step.key, { ...entry, rung: outcome.rung });
-    const fromText = describeTarget(before);
-    const toText = describeTarget(outcome.target);
-    // Same locator, new place: the heal is the landmark move, so say that rather than "X became X".
-    const moved =
-      fromText === toText && expectation.cached ? `moved from ${describeLandmark(expectation.cached.fingerprint)} to ${describeLandmark(outcome.fingerprint)}` : null;
-    events.emit('healed', { ...heal, fromText, toText, moved });
+    events.emit('healed', { ...heal, fromText, toText, moved: movedTo ? `moved ${movedTo}` : null });
   }
 
   /** The terminal milestone's committing step, once it is known. */
@@ -455,6 +468,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       actions++;
       const actionStarted = performance.now();
       const actedOnThisScreen = actedHere();
+      const requestsBefore = appRequests.length;
       await perform(page, step, locator, value, origin, stepBudget());
       if (resolution?.outcome.target) actedOnThisScreen.push(resolution.outcome.target);
       if (attempt === 1) doneSteps.push(step);
@@ -486,7 +500,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
 
       const nextStep = milestone.steps[index + 1];
       const nextTarget: ConcreteTarget | null = nextStep && 'target' in nextStep && nextStep.target ? concreteTarget(nextStep.target, inputs) : null;
-      const checked = await checkProgress({ page, step, locator, value, before, after, nextTarget });
+      const checked = await checkProgress({ page, step, locator, value, before, after, nextTarget, appRequests: appRequests.slice(requestsBefore) });
       // The detail can quote the page (an alert); input values never reach the log.
       const progress = { ...checked, detail: redactValues(checked.detail, valueOwners) };
       events.emit('progress', { stepKey: step.key, ok: progress.ok, detail: progress.detail });
@@ -568,7 +582,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
   async function opensHere(milestone: Milestone): Promise<boolean> {
     const step = milestone.steps[0];
     if (!step) return false;
-    const expectation = expectationFor(step, cacheEntryFor(step), inputs);
+    const expectation = expectationFor(step, cacheEntryFor(step), inputs, milestone.terminal);
     if (!expectation) return false;
     return (await ladder.rung1(expectation, 0)).ok || (await ladder.rung2(expectation, actedHere())).ok;
   }
@@ -734,5 +748,6 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     return finish(stop.runOutcome, { code: stop.code, message: stop.message });
   } finally {
     page.off('requestfailed', onRequestFailed);
+    page.off('response', onResponse);
   }
 }

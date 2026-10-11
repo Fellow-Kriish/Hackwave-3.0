@@ -2,6 +2,7 @@ import type { Progress, Step } from '@hackwave/contracts';
 import type { Locator, Page } from 'playwright';
 import type { PageState } from './aria';
 import { buildLocator, type ConcreteTarget } from './resolve';
+import { sameValue } from './values';
 
 type AriaRole = Parameters<Page['getByRole']>[0];
 
@@ -46,6 +47,8 @@ export interface ProgressInput {
   after: PageState;
   /** The next step's target, for the "next target became visible" signal. */
   nextTarget: ConcreteTarget | null;
+  /** Same-site requests that change data ("POST /api/cart") and succeeded during the action. */
+  appRequests?: readonly string[];
 }
 
 export interface ProgressCheck {
@@ -71,7 +74,9 @@ export async function checkProgress(input: ProgressInput): Promise<ProgressCheck
         step.action === 'select'
           ? await locator.evaluate((element) => (element as HTMLSelectElement).selectedOptions[0]?.label ?? '')
           : await locator.inputValue({ timeout: 2000 });
-      return actual === value ? { ok: true, detail: 'value read back' } : { ok: false, detail: 'the field read back a different value' };
+      if (actual === value) return { ok: true, detail: 'value read back' };
+      if (sameValue(actual, value)) return { ok: true, detail: 'value read back, as the app formats it' };
+      return { ok: false, detail: 'the field read back a different value' };
     }
     case 'change': {
       if (after.url !== before.url) return { ok: true, detail: `url changed to ${new URL(after.url).pathname}` };
@@ -83,6 +88,9 @@ export async function checkProgress(input: ProgressInput): Promise<ProgressCheck
         if (alerts.length === 0) return { ok: true, detail: 'a status message changed' };
         return { ok: false, detail: `the page only showed an alert: ${alerts.map((text) => `"${text}"`).join(', ')}` };
       }
+      // The page barely changed, but the app saved something: that click did something.
+      const [request] = input.appRequests ?? [];
+      if (request) return { ok: true, detail: `the app sent ${request}` };
       if (nextTarget && (await buildLocator(page, nextTarget).locator.filter({ visible: true }).count()) > 0) {
         return { ok: true, detail: 'next target is visible' };
       }
