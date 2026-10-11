@@ -1,5 +1,8 @@
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import type { EngineConfig } from './config';
+import { describeTier, readManifest, resolveLlmSettings } from './llm';
 
 export interface Check {
   name: string;
@@ -24,7 +27,27 @@ async function request(url: string, init: RequestInit = {}): Promise<{ status: n
  * Preflight before any run. Failures here are setup errors, reported before a run starts and never a GREY verdict.
  * With reset: true it also clears every shop's store through the test-only endpoint.
  */
-export async function runDoctor(config: EngineConfig, options: { reset: boolean }): Promise<Check[]> {
+/** Replay mode needs the recorded cache; live and record need a configured model. */
+function llmCheck(config: EngineConfig, root: string): Check {
+  const cacheDir = join(root, 'runs', 'llm-cache');
+  try {
+    const manifest = readManifest(cacheDir);
+    const settings = resolveLlmSettings(config, process.env, manifest);
+    if (settings.mode === 'replay') {
+      if (!manifest) return { name: 'replay cache', status: 'fail', detail: 'LLM_MODE is replay but runs/llm-cache has no manifest; record first with LLM_MODE=record' };
+      const entries = readdirSync(cacheDir).filter((file) => file.endsWith('.json') && file !== 'manifest.json').length;
+      return { name: 'replay cache', status: 'pass', detail: `${entries} recorded call(s), pinned to ${describeTier(settings.tiers.strong)}; no API key needed` };
+    }
+    const strong = settings.tiers.strong;
+    return strong.ok
+      ? { name: 'llm', status: 'pass', detail: `${settings.mode} mode · strong ${describeTier(strong)} · fast ${describeTier(settings.tiers.fast)}` }
+      : { name: 'llm', status: 'fail', detail: `${settings.mode} mode but the strong tier is ${describeTier(strong)}` };
+  } catch (error) {
+    return { name: 'llm', status: 'fail', detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function runDoctor(config: EngineConfig, options: { reset: boolean; root: string }): Promise<Check[]> {
   const checks: Check[] = [];
 
   for (const [version, port] of Object.entries(config.shop.ports)) {
@@ -108,6 +131,6 @@ export async function runDoctor(config: EngineConfig, options: { reset: boolean 
     });
   }
 
-  checks.push({ name: 'replay cache', status: 'skip', detail: 'arrives with the LLM adapter in P2' });
+  checks.push(llmCheck(config, options.root));
   return checks;
 }

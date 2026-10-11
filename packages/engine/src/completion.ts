@@ -1,6 +1,6 @@
 import type { Milestone } from '@hackwave/contracts';
 import type { Page } from 'playwright';
-import { buildLocator, concreteTarget } from './resolve';
+import { buildLocator, concreteTarget, nameOption } from './resolve';
 
 type AriaRole = Parameters<Page['getByRole']>[0];
 
@@ -18,8 +18,7 @@ export async function completionHolds(page: Page, milestone: Milestone, inputs: 
       return { holds, detail: `heading containing "${completion.text}" ${holds ? 'is visible' : 'is not visible'}` };
     }
     case 'visible': {
-      const holds =
-        (await page.getByRole(completion.role as AriaRole, { name: completion.name, exact: true }).filter({ visible: true }).count()) > 0;
+      const holds = (await page.getByRole(completion.role as AriaRole, nameOption(completion.name)).filter({ visible: true }).count()) > 0;
       return { holds, detail: `${completion.role} "${completion.name}" ${holds ? 'is visible' : 'is not visible'}` };
     }
     case 'url': {

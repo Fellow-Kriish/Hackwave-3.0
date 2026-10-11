@@ -1,27 +1,37 @@
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config';
 import { runDoctor, type Check } from './doctor';
+import { loadDotEnv } from './env';
 import { runEvals } from './evals';
+import { findRepoRoot } from './paths';
 import { exitCodeFor, runIntent, SetupError } from './run';
 
 const USAGE = `usage: pnpm engine <command> [options]
 
 available now:
-  doctor [--reset]                                  preflight: shop ports, reset endpoint, baseline, browser, replay cache
-  run --intent <file> --target <url> --plan <file>  one execution; streams events and writes a run folder under runs/
-      [--headed] [--slow-mo <ms>]                   (--plan is optional once the planner exists, in P2)
-  eval [fixture] [--verbose]                        runs one or all eval fixtures and compares verdicts
+  doctor [--reset]                       preflight: shop ports, reset endpoint, baseline, browser, replay cache
+  run --intent <file> --target <url>     one execution; streams events and writes a run folder under runs/
+      [--plan <file>]                    a hand-written plan; without it the cached plan or the planner is used
+      [--llm-mode live|record|replay]    overrides LLM_MODE (replay needs no API key)
+      [--headed] [--slow-mo <ms>]
+  eval [fixture] [--verbose]             runs one or all eval fixtures and compares verdicts
+      [--llm-mode live|record|replay]
 
 planned (docs/BUILD.md):
-  run ... --llm-mode live|record|replay             P2
-  lint <intent>                                     P5
-  init <goal>                                       P5
-  snapshot save|restore <name>                      P6
-  demo                                              P6
+  lint <intent>                          P5
+  init <goal>                            P5
+  snapshot save|restore <name>           P6
+  demo                                   P6
 
 exit codes: 0 GREEN or AMBER · 1 RED · 2 GREY · 3 setup error`;
 
 const PLANNED: Record<string, string> = { lint: 'P5', init: 'P5', snapshot: 'P6', demo: 'P6' };
+const LLM_MODES = new Set(['live', 'record', 'replay']);
+
+function llmMode(value: string | undefined): string | undefined {
+  if (value !== undefined && !LLM_MODES.has(value)) throw new SetupError(`--llm-mode must be live, record or replay (got "${value}")`);
+  return value;
+}
 
 function printChecks(checks: Check[]): void {
   const width = Math.max(...checks.map((check) => check.name.length));
@@ -33,9 +43,10 @@ function printChecks(checks: Check[]): void {
 
 async function doctor(args: string[]): Promise<number> {
   const { values } = parseArgs({ args, options: { reset: { type: 'boolean', default: false } }, strict: true });
-  const config = loadConfig();
+  const root = findRepoRoot();
+  const config = loadConfig(root);
   console.log('doctor');
-  const checks = await runDoctor(config, { reset: values.reset });
+  const checks = await runDoctor(config, { reset: values.reset, root });
   printChecks(checks);
   const failed = checks.filter((check) => check.status === 'fail').length;
   console.log(failed === 0 ? '\ndoctor: ready' : `\ndoctor: ${failed} check(s) failed; fix them before running`);
@@ -50,6 +61,7 @@ async function run(args: string[]): Promise<number> {
       intent: { type: 'string' },
       target: { type: 'string' },
       plan: { type: 'string' },
+      'llm-mode': { type: 'string' },
       headed: { type: 'boolean', default: false },
       'slow-mo': { type: 'string' },
     },
@@ -57,7 +69,15 @@ async function run(args: string[]): Promise<number> {
   if (!values.intent || !values.target) throw new SetupError('run needs --intent <file> and --target <url>');
   const slowMo = values['slow-mo'] === undefined ? 0 : Number(values['slow-mo']);
   if (!Number.isInteger(slowMo) || slowMo < 0) throw new SetupError('--slow-mo must be a whole number of milliseconds');
-  const { verdict } = await runIntent({ intentFile: values.intent, target: values.target, planFile: values.plan, headed: values.headed, slowMo });
+  const mode = llmMode(values['llm-mode']);
+  const { verdict } = await runIntent({
+    intentFile: values.intent,
+    target: values.target,
+    planFile: values.plan,
+    headed: values.headed,
+    slowMo,
+    envOverride: mode ? { LLM_MODE: mode } : {},
+  });
   return exitCodeFor(verdict);
 }
 
@@ -66,12 +86,13 @@ async function evaluate(args: string[]): Promise<number> {
     args,
     strict: true,
     allowPositionals: true,
-    options: { verbose: { type: 'boolean', default: false } },
+    options: { verbose: { type: 'boolean', default: false }, 'llm-mode': { type: 'string' } },
   });
-  return runEvals({ only: positionals[0], verbose: values.verbose });
+  return runEvals({ only: positionals[0], verbose: values.verbose, llmMode: llmMode(values['llm-mode']) });
 }
 
 async function main(argv: string[]): Promise<number> {
+  loadDotEnv(findRepoRoot());
   const [command, ...args] = argv;
   if (command === undefined || command === 'help' || command === '--help' || command === '-h') {
     console.log(USAGE);

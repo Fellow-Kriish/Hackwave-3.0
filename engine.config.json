@@ -35,7 +35,19 @@
     "mode": "replay",
     "provider": "anthropic",
     "providerFast": null,
-    "baseUrl": null
+    "baseUrl": null,
+    "maxInputTokens": 12000,
+    "maxOutputTokens": 8192,
+    "callTimeoutMs": 60000,
+    "providers": {
+      "anthropic": { "driver": "anthropic", "baseUrl": "https://api.anthropic.com", "needsKey": true, "jsonMode": false },
+      "openai": { "driver": "openai-compatible", "baseUrl": "https://api.openai.com/v1", "needsKey": true, "jsonMode": true, "maxTokensField": "max_completion_tokens" },
+      "gemini": { "driver": "openai-compatible", "baseUrl": "https://generativelanguage.googleapis.com/v1beta/openai", "needsKey": true, "jsonMode": true },
+      "groq": { "driver": "openai-compatible", "baseUrl": "https://api.groq.com/openai/v1", "needsKey": true, "jsonMode": true, "maxTokensField": "max_completion_tokens" },
+      "openrouter": { "driver": "openai-compatible", "baseUrl": "https://openrouter.ai/api/v1", "needsKey": true, "jsonMode": false },
+      "ollama": { "driver": "openai-compatible", "baseUrl": "http://localhost:11434/v1", "needsKey": false, "jsonMode": false },
+      "custom": { "driver": "openai-compatible", "baseUrl": null, "needsKey": false, "jsonMode": false }
+    }
   },
   "shop": {
     "ports": {

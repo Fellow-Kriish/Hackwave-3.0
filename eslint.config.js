@@ -22,6 +22,31 @@ export default defineConfig([
     },
   },
   {
+    // One adapter is the only door to the model, and only its callers may open it: the planner (and, later,
+    // rung 3, the re-planner and the RED explainer). run.ts and doctor.ts wire it up; the executor never can.
+    files: ['packages/engine/src/**/*.ts'],
+    ignores: [
+      'packages/engine/src/llm/**',
+      'packages/engine/src/planner.ts',
+      'packages/engine/src/run.ts',
+      'packages/engine/src/doctor.ts',
+      'packages/engine/src/**/*.test.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/llm', '**/llm/**'],
+              message: 'Only the planner, rung 3, the re-planner and the explainer may use the LLM adapter.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // The verifier decides pass/fail and must never reach the LLM adapter (packages/engine/src/llm).
     // Contracts stay dependency-free for the same reason. Dynamic import() would dodge the static rule, so it is banned too.
     files: ['packages/verifier/**/*.ts', 'packages/contracts/**/*.ts'],

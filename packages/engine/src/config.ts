@@ -38,13 +38,32 @@ export const EngineConfigSchema = z.strictObject({
     resolver: tier,
     explain: tier,
   }),
-  /** The API key is never in this file: env LLM_API_KEY only. */
-  llm: z.strictObject({
-    mode: z.enum(['live', 'record', 'replay']),
-    provider: z.string().min(1),
-    providerFast: z.string().min(1).nullable(),
-    baseUrl: z.url().nullable(),
-  }),
+  /** The API key is never in this file: env LLM_API_KEY only. Provider ids, base URLs and model ids never live in code. */
+  llm: z
+    .strictObject({
+      mode: z.enum(['live', 'record', 'replay']),
+      provider: z.string().min(1),
+      providerFast: z.string().min(1).nullable(),
+      baseUrl: z.url().nullable(),
+      /** Inputs above this (estimated at 4 characters a token) are refused, never truncated. */
+      maxInputTokens: positiveInt,
+      maxOutputTokens: positiveInt,
+      callTimeoutMs: positiveInt,
+      /** The provider registry: LLM_PROVIDER picks an entry; LLM_BASE_URL overrides its default base URL. */
+      providers: z.record(
+        z.string().regex(/^[a-z][a-z0-9-]*$/),
+        z.strictObject({
+          driver: z.enum(['anthropic', 'openai-compatible']),
+          baseUrl: z.url().nullable(),
+          needsKey: z.boolean(),
+          /** Ask for native JSON output where the provider supports it. */
+          jsonMode: z.boolean(),
+          maxTokensField: z.enum(['max_tokens', 'max_completion_tokens']).optional(),
+        }),
+      ),
+    })
+    .refine((llm) => llm.provider in llm.providers, 'llm.provider must be one of llm.providers')
+    .refine((llm) => llm.providerFast === null || llm.providerFast in llm.providers, 'llm.providerFast must be one of llm.providers'),
   shop: z.strictObject({
     ports: z.strictObject({
       v1: port,

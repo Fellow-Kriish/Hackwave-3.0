@@ -34,7 +34,8 @@ export function emptyRungHistogram(): RungHistogram {
   return { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
 }
 
-export const LlmCallsSchema = z.strictObject({ total: count, byModel: z.record(z.string(), count) });
+/** total counts every adapter call, live or replayed; cached is how many of them came from runs/llm-cache. */
+export const LlmCallsSchema = z.strictObject({ total: count, cached: count, byModel: z.record(z.string(), count) });
 export type LlmCalls = z.infer<typeof LlmCallsSchema>;
 
 export const TokensSchema = z.strictObject({

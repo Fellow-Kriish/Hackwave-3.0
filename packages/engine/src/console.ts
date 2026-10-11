@@ -24,6 +24,33 @@ export function printEvent(event: EngineEvent): void {
     case 'plan_mismatch':
       line(yellow(`note: ${e.message}`));
       break;
+    case 'llm_settings':
+      if (e.used || e.mode !== 'replay') {
+        line(dim(`llm: ${e.mode}${e.pinnedToManifest ? ' (pinned to runs/llm-cache/manifest.json)' : ''} · strong ${e.strong} · fast ${e.fast}`));
+      }
+      break;
+    case 'plan_cache_miss':
+      line(dim(`plan: ${e.reason}; the planner will write one`));
+      break;
+    case 'llm_call':
+      line(
+        cyan(`  [llm] ${e.stage} · ${e.provider} · ${e.model}`) +
+          dim(` · ${e.cacheHit ? 'from cache' : `${e.tokensIn}→${e.tokensOut} tokens`} · ${seconds(e.ms)}${e.attempts > 1 ? ` · ${e.attempts} attempts` : ''}`) +
+          (e.failed ? red(` · invalid: ${e.failed}`) : ''),
+      );
+      if (e.retried) line(yellow(`        first reply rejected, retried once: ${e.retried}`));
+      break;
+    case 'planned':
+      line(
+        `plan: ${(e.milestones as { key: string; terminal: boolean }[]).map((milestone) => `${milestone.key}${milestone.terminal ? ' (terminal)' : ''}`).join(' → ')}`,
+      );
+      break;
+    case 'expanded':
+      line(dim(`  expanded ${(e.milestones as string[]).join(', ')} on ${e.path}: ${e.steps} step(s)`));
+      break;
+    case 'plan_cached':
+      line(dim(`plan cached in ${e.file}`));
+      break;
     case 'verifier_baseline':
       line(dim(`verifier: baseline ${e.count} record(s), max id ${e.maxId ?? 'none'}`));
       break;
@@ -58,7 +85,7 @@ export function printEvent(event: EngineEvent): void {
       if (!e.ok) line(red(`      ✗ no progress: ${e.detail}`));
       break;
     case 'milestone_done':
-      line(e.holds ? green(`  ✓ ${e.milestoneKey} complete (${e.detail})`) : red(`  ✗ ${e.milestoneKey} incomplete: ${e.detail}`));
+      line(e.holds ? green(`  ✓ ${e.milestoneKey} complete (${e.detail})`) : yellow(`  ~ ${e.milestoneKey} ran; completion unconfirmed (${e.detail})`));
       break;
     case 'healer_done':
       line(
