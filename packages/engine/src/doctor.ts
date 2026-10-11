@@ -1,8 +1,13 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { sha256 } from '@hackwave/contracts';
 import { chromium } from 'playwright';
 import type { EngineConfig } from './config';
-import { describeTier, readManifest, resolveLlmSettings } from './llm';
+import { lintIntentText } from './intent-lint';
+import { describeTier, loadPrompt, readManifest, resolveLlmSettings, type Manifest, type PromptFile } from './llm';
+import { LocatorCache } from './locator-cache';
+import { loadCachedPlan } from './plan-cache';
+import { planPromptHash } from './planner';
 
 export interface Check {
   name: string;
@@ -47,8 +52,78 @@ function llmCheck(config: EngineConfig, root: string): Check {
   }
 }
 
-export async function runDoctor(config: EngineConfig, options: { reset: boolean; root: string }): Promise<Check[]> {
+const MIN_NODE = [20, 19] as const;
+
+function nodeCheck(): Check {
+  const [major = 0, minor = 0] = process.versions.node.split('.').map(Number);
+  const ok = major > MIN_NODE[0] || (major === MIN_NODE[0] && minor >= MIN_NODE[1]);
+  return { name: 'node', status: ok ? 'pass' : 'fail', detail: `Node ${process.versions.node}${ok ? '' : `; ${MIN_NODE.join('.')} or newer is needed`}` };
+}
+
+/** Every prompt the engine calls with. A RED hypothesis missing from the replay cache is skipped, never a failure. */
+const PROMPTS = ['planner', 'expand', 'resolve', 'replan', 'explain'] as const;
+const OPTIONAL_IN_REPLAY = new Set<string>(['explain']);
+
+/**
+ * Prompt files load with their version line, and still match what the replay cache was recorded with: a prompt
+ * edited since recording means replay misses every call that uses it.
+ */
+export function promptsCheck(prompts: readonly PromptFile[], manifest: Manifest | null, mode: string): Check {
+  const versions = prompts.map((prompt) => prompt.version).join(', ');
+  if (!manifest) return { name: 'prompts', status: 'pass', detail: `${versions}; nothing recorded yet` };
+  const changed = prompts.filter((prompt) => manifest.prompts[prompt.name] !== undefined && manifest.prompts[prompt.name] !== prompt.hash).map((prompt) => prompt.name);
+  const unrecorded = prompts.filter((prompt) => manifest.prompts[prompt.name] === undefined).map((prompt) => prompt.name);
+  const parts = [versions];
+  if (changed.length > 0) parts.push(`changed since recording: ${changed.join(', ')} (re-record with --llm-mode record)`);
+  if (unrecorded.length > 0) parts.push(`never recorded: ${unrecorded.join(', ')}`);
+  if (changed.length === 0 && unrecorded.length === 0) parts.push('all match the replay cache');
+  const blocking = mode === 'replay' ? changed.filter((name) => !OPTIONAL_IN_REPLAY.has(name)) : [];
+  return { name: 'prompts', status: blocking.length > 0 ? 'fail' : 'pass', detail: parts.join('; ') };
+}
+
+/** Every intent under intents/ lints clean, and its cached plan and locators load. */
+function intentChecks(root: string, prompts: readonly PromptFile[]): Check[] {
+  const dir = join(root, 'intents');
+  const files = existsSync(dir) ? readdirSync(dir).filter((file) => file.endsWith('.json')) : [];
+  if (files.length === 0) return [{ name: 'intents', status: 'fail', detail: 'no intents/*.json; scaffold one with pnpm engine init "<goal>"' }];
+  const byName = new Map(prompts.map((prompt) => [prompt.name, prompt]));
+  const plan = byName.get('planner');
+  const expand = byName.get('expand');
   const checks: Check[] = [];
+  const valid: string[] = [];
+  for (const file of files) {
+    const result = lintIntentText(readFileSync(join(dir, file), 'utf8'));
+    if (!result.intent) {
+      const first = result.problems[0];
+      checks.push({ name: `intent ${file}`, status: 'fail', detail: `${result.problems.length} problem(s)${first ? `, first: ${first.path || '(file)'} ${first.message}` : ''}; see pnpm engine lint intents/${file}` });
+      continue;
+    }
+    valid.push(result.intent.id);
+    const notes: string[] = [];
+    let failed = false;
+    if (plan && expand) {
+      const cached = loadCachedPlan(root, result.intent.id, sha256(result.intent.goal), planPromptHash({ plan, expand }));
+      if (cached.plan) notes.push(`plan cached (${cached.plan.milestones.length} milestones)`);
+      else if (cached.reason === 'no cached plan') notes.push('no cached plan: the planner writes one');
+      else {
+        notes.push(`cached plan not used: ${cached.reason}`);
+        failed = true;
+      }
+    }
+    for (const hand of [false, true]) {
+      const locators = LocatorCache.load(root, result.intent.id, hand);
+      if (locators.problem) {
+        notes.push(`${hand ? 'hand ' : ''}locator cache ignored: ${locators.problem}`);
+        failed = true;
+      } else if (!hand && existsSync(locators.file)) notes.push('locator cache loads');
+    }
+    checks.push({ name: `intent ${file}`, status: failed ? 'fail' : 'pass', detail: `${result.intent.id}: ${notes.join('; ')}` });
+  }
+  return checks;
+}
+
+export async function runDoctor(config: EngineConfig, options: { reset: boolean; root: string }): Promise<Check[]> {
+  const checks: Check[] = [nodeCheck()];
 
   for (const [version, port] of Object.entries(config.shop.ports)) {
     const base = `http://127.0.0.1:${port}`;
@@ -132,5 +207,27 @@ export async function runDoctor(config: EngineConfig, options: { reset: boolean;
   }
 
   checks.push(llmCheck(config, options.root));
+
+  const prompts: PromptFile[] = [];
+  const unreadable: string[] = [];
+  for (const name of PROMPTS) {
+    try {
+      prompts.push(loadPrompt(options.root, name));
+    } catch (error) {
+      unreadable.push(reason(error));
+    }
+  }
+  if (unreadable.length > 0) {
+    checks.push({ name: 'prompts', status: 'fail', detail: unreadable.join('; ') });
+  } else {
+    let mode = 'replay';
+    try {
+      mode = resolveLlmSettings(config, process.env, readManifest(join(options.root, 'runs', 'llm-cache'))).mode;
+    } catch {
+      // llmCheck above already reports a bad LLM setting.
+    }
+    checks.push(promptsCheck(prompts, readManifest(join(options.root, 'runs', 'llm-cache')), mode));
+  }
+  checks.push(...intentChecks(options.root, prompts));
   return checks;
 }

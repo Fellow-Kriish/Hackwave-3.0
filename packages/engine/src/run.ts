@@ -25,7 +25,9 @@ import { LocatorCache } from './locator-cache';
 import { findRepoRoot } from './paths';
 import { cacheablePlan, loadCachedPlan, planCacheFile, savePlanCache } from './plan-cache';
 import { createPlanner, planPromptHash } from './planner';
-import { printFinalBlock, renderReport } from './report';
+import { createExplainer, type Explanation } from './explain';
+import { markdownToHtml } from './html';
+import { banner, printFinalBlock, renderReport, type LocatorChange, type ReportContext } from './report';
 import { createReplanner } from './replanner';
 import { createRung3Picker } from './resolver';
 import { createRunDir } from './run-dir';
@@ -111,6 +113,7 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
   const prompts = asSetupError(() => ({ plan: loadPrompt(root, 'planner'), expand: loadPrompt(root, 'expand') }));
   const resolvePrompt = asSetupError(() => loadPrompt(root, 'resolve'));
   const replanPrompt = asSetupError(() => loadPrompt(root, 'replan'));
+  const explainPrompt = asSetupError(() => loadPrompt(root, 'explain'));
   const promptHash = planPromptHash(prompts);
   let plan: Plan | null;
   let planSource: PlanSourceKind;
@@ -185,7 +188,10 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
   const planner = createPlanner({ llm, prompts, healer, inputValues: inputs, goalHash, tree: config.tree });
   const replanner = createReplanner({ llm, prompt: replanPrompt, healer, inputValues: inputs, tree: config.tree });
   const locators = LocatorCache.load(root, intent.id, planSource === 'hand-written');
+  // A second, untouched copy: the report shows each entry the run wrote against what it held before.
+  const locatorsBefore = LocatorCache.load(root, intent.id, planSource === 'hand-written');
   const locatorsLabel = relative(root, locators.file).replace(/\\/g, '/');
+  const explainer = createExplainer({ llm, prompt: explainPrompt, valueOwners: valueOwnersOf(inputs) });
   if (locators.problem) events.emit('locator_cache_ignored', { file: locatorsLabel, reason: locators.problem });
   const picker = createRung3Picker({
     llm,
@@ -245,6 +251,8 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
             expanded: [],
             replanned: [],
             completed: [],
+            started: [],
+            skipped: [],
           },
         );
       }, budgets.runMs + WATCHDOG_GRACE_MS);
@@ -275,11 +283,13 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
       hung,
     ]).finally(() => clearTimeout(watchdog));
 
-    const { plan: executedPlan, expanded, replanned, completed, reusedHealsFrom, ...outcome } = execution;
+    const { plan: executedPlan, expanded, replanned, completed, reusedHealsFrom, started, skipped, ...outcome } = execution;
     writeJson('plan-used.json', executedPlan);
     // Planned and re-planned steps go to the plan cache, so the next run needs no model; hand plans never do.
+    let planCached = false;
     if (planSource !== 'hand-written' && executedPlan && (planSource === 'planner' || expanded.length > 0 || replanned.length > 0)) {
       const file = savePlanCache(root, cacheablePlan(executedPlan, expanded, completed, { keys: replanned, original: plan }));
+      planCached = true;
       events.emit('plan_cached', { file: relative(root, file).replace(/\\/g, '/'), expanded, replanned, completed });
     }
     // The fix the system emits: heals are written to the locator cache for review; the next run hits rung 1.
@@ -304,20 +314,44 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
     const verdict = decideVerdict(oracle, record);
     events.emit('verdict', { color: verdict.color, kind: verdict.kind, reasons: verdict.reasons });
 
-    const reportContext = {
+    // Reporter-explain: after a real bug only, once the verdict is final; it narrates and cannot change it.
+    let explanation: Explanation | null = null;
+    if (verdict.kind === 'real_bug') {
+      explanation = await explainer.explain(verdict);
+      if ('hypothesis' in explanation) events.emit('explained', { hypothesis: explanation.hypothesis });
+      else events.emit('explain_skipped', { reason: explanation.skipped });
+    }
+
+    const locatorChanges: LocatorChange[] = locatorsUpdated.flatMap((stepKey) => {
+      const after = locators.get(stepKey);
+      return after ? [{ stepKey, before: locatorsBefore.get(stepKey)?.locator ?? null, after: after.locator, rung: after.rung }] : [];
+    });
+    const reportContext: ReportContext = {
       config: { ...config, budgets },
       record,
+      intentFile: relative(root, resolve(options.intentFile)).replace(/\\/g, '/'),
       planFile: planLabel,
       planSource,
       runDir,
       llmMode: settings.mode,
       locatorsFile: locatorsLabel,
       locatorsUpdated,
+      locatorChanges,
       reusedHealsFrom,
+      planBefore: plan,
+      planAfter: executedPlan,
+      planCached,
+      started,
+      skipped,
+      expanded,
+      replanned,
+      explanation,
     };
     writeJson('run-record.json', record);
     writeJson('verdict.json', verdict);
-    writeFileSync(join(runDir, 'report.md'), renderReport(verdict, reportContext));
+    const markdown = renderReport(verdict, reportContext);
+    writeFileSync(join(runDir, 'report.md'), markdown);
+    writeFileSync(join(runDir, 'report.html'), markdownToHtml(markdown, `${banner(verdict)} · ${intent.id}`));
     if (!options.quiet) printFinalBlock(verdict, reportContext);
     return { verdict, runDir, planSource };
   } finally {

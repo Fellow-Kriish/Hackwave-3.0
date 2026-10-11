@@ -147,7 +147,19 @@ export class LlmAdapter {
       return reply.value;
     }
 
-    if (settings.mode === 'record') this.checkManifest();
+    if (settings.mode === 'record') {
+      this.checkManifest();
+      // Recording fills gaps: a call already recorded (same provider, model, prompt and input) whose reply still
+      // validates is reused, so re-recording a set of fixtures pays only for what changed. Delete its cache file
+      // to record it afresh.
+      const entry = this.cache.read(key);
+      const reply = entry ? parseReply(entry.text, request.schema) : null;
+      if (entry && reply?.ok) {
+        this.cached++;
+        report({ cacheHit: true, attempts: entry.attempts, input: 0, output: 0 });
+        return reply.value;
+      }
+    }
     const endpoint = setting.endpoint;
     if (!endpoint) throw new LlmError('environment', 'llm_not_configured', `the ${tier} model tier has no endpoint`);
     const driver = this.driverFor(endpoint);

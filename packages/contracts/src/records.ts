@@ -55,9 +55,12 @@ export type HealEvent = z.infer<typeof HealEventSchema>;
 
 export const ReplanEventSchema = z.strictObject({
   milestoneKey: z.string(),
+  /** Why the milestone went to rung 5: each rung's failure, or what the progress check saw. */
   reason: z.string(),
   oldSteps: z.array(StepSchema),
   newSteps: z.array(StepSchema),
   attempt: z.number().int().positive(),
+  /** The re-planner's own one sentence on what changed and what the new steps do. */
+  rationale: z.string().optional(),
 });
 export type ReplanEvent = z.infer<typeof ReplanEventSchema>;

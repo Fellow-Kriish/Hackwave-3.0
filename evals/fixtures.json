@@ -153,7 +153,10 @@
       "kind": "passed",
       "planSource": "cache",
       "heals": 0,
-      "maxLlmCalls": 0
+      "maxLlmCalls": 0,
+      "reportIncludes": [
+        "> Passed: the system of record has the new record"
+      ]
     }
   },
   {
@@ -236,7 +239,12 @@
         "3": 1
       },
       "minReplans": 1,
-      "maxLlmCalls": 8
+      "maxLlmCalls": 8,
+      "reportIncludes": [
+        "## Plan diff",
+        "## Suggested fix",
+        "## Heal UI drift in checkout-valid-card"
+      ]
     }
   },
   {
@@ -253,7 +261,8 @@
       "replans": 0,
       "maxLlmCalls": 0,
       "reportIncludes": [
-        "Locators healed earlier by run"
+        "Locators healed earlier by run",
+        "> Passed: the system of record has the new record"
       ]
     }
   },
@@ -272,7 +281,12 @@
       "healerBelievedDone": true,
       "heals": 0,
       "replans": 0,
-      "maxLlmCalls": 0
+      "maxLlmCalls": 0,
+      "reportIncludes": [
+        "> The page said",
+        "## Two notions of done",
+        "## Hypothesis"
+      ]
     }
   },
   {

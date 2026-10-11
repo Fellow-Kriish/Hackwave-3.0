@@ -1,8 +1,12 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config';
 import { runDoctor, type Check } from './doctor';
 import { loadDotEnv } from './env';
 import { runEvals } from './evals';
+import { idFromGoal, scaffoldIntent } from './init';
+import { formatLint, lintIntentText } from './intent-lint';
 import { findRepoRoot } from './paths';
 import { exitCodeFor, runIntent, SetupError } from './run';
 
@@ -18,16 +22,16 @@ available now:
       [--llm-mode live|record|replay]    plan and locator caches are restored afterwards
       [--keep-caches]                    ... unless this is given
       [--headed] [--slow-mo <ms>]        watch every fixture's browser
+  lint <intent...>                       checks intent files: JSON, schema, inputs, placeholders; one line per problem
+  init <goal> [--id <id>] [--out <file>] scaffolds intents/<id>.json from a goal sentence, with TODOs that lint flags
 
 planned (docs/BUILD.md):
-  lint <intent>                          P5
-  init <goal>                            P5
   snapshot save|restore <name>           P6
   demo                                   P6
 
-exit codes: 0 GREEN or AMBER · 1 RED · 2 GREY · 3 setup error`;
+exit codes: run and eval 0 GREEN or AMBER · 1 RED · 2 GREY · 3 setup error; lint 0 clean · 1 problems`;
 
-const PLANNED: Record<string, string> = { lint: 'P5', init: 'P5', snapshot: 'P6', demo: 'P6' };
+const PLANNED: Record<string, string> = { snapshot: 'P6', demo: 'P6' };
 const LLM_MODES = new Set(['live', 'record', 'replay']);
 
 function llmMode(value: string | undefined): string | undefined {
@@ -111,6 +115,43 @@ async function evaluate(args: string[]): Promise<number> {
   });
 }
 
+function lint(args: string[]): number {
+  const { positionals } = parseArgs({ args, strict: true, allowPositionals: true, options: {} });
+  if (positionals.length === 0) throw new SetupError('lint needs one or more intent files, e.g. pnpm engine lint intents/checkout.json');
+  let problems = 0;
+  for (const file of positionals) {
+    let text: string;
+    try {
+      text = readFileSync(resolve(file), 'utf8');
+    } catch (error) {
+      throw new SetupError(`cannot read ${file}: ${(error as NodeJS.ErrnoException).code ?? String(error)}`);
+    }
+    const result = lintIntentText(text);
+    problems += result.problems.length;
+    console.log(result.problems.length === 0 ? `✓ ${file}: a valid intent (${result.intent?.id})` : `✗ ${formatLint(file, result)}`);
+  }
+  return problems === 0 ? 0 : 1;
+}
+
+function init(args: string[]): number {
+  const { values, positionals } = parseArgs({ args, strict: true, allowPositionals: true, options: { id: { type: 'string' }, out: { type: 'string' } } });
+  const goal = positionals.join(' ').trim();
+  if (goal.length < 10) throw new SetupError('init needs the goal as one sentence, e.g. pnpm engine init "As a shopper, buy a gift card and reach confirmation."');
+  const id = values.id ?? idFromGoal(goal);
+  const root = findRepoRoot();
+  const file = values.out ? resolve(values.out) : join(root, 'intents', `${id}.json`);
+  if (existsSync(file)) throw new SetupError(`${file} already exists; pick another --id or --out`);
+  const text = scaffoldIntent(goal, id);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text, { flag: 'wx' });
+  const inside = relative(root, file);
+  const label = (inside.startsWith('..') ? file : inside).replace(/\\/g, '/');
+  console.log(`wrote ${label}\n`);
+  console.log(formatLint(label, lintIntentText(text)));
+  console.log(`\nnext: replace every TODO, then pnpm engine lint ${label}`);
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   loadDotEnv(findRepoRoot());
   const [command, ...args] = argv;
@@ -121,6 +162,8 @@ async function main(argv: string[]): Promise<number> {
   if (command === 'doctor') return doctor(args);
   if (command === 'run') return run(args);
   if (command === 'eval') return evaluate(args);
+  if (command === 'lint') return lint(args);
+  if (command === 'init') return init(args);
   const phase = PLANNED[command];
   console.error(phase ? `"${command}" is planned for ${phase} and not built yet.` : `Unknown command "${command}".\n\n${USAGE}`);
   return 2;

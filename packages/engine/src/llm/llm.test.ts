@@ -212,6 +212,18 @@ describe('adapter', () => {
     });
   });
 
+  it('record fills gaps: a call already recorded is reused, a new one goes to the model', async () => {
+    const first = scripted([{ content: '{"answer":1}' }]);
+    await adapter('record', first.fetchImpl).call({ stage: 'planner', prompt, input: 'q', schema });
+    const second = scripted([{ content: '{"answer":2}' }]);
+    const again = adapter('record', second.fetchImpl);
+    expect(await again.call({ stage: 'planner', prompt, input: 'q', schema })).toEqual({ answer: 1 });
+    expect(second.calls).toHaveLength(0);
+    expect(await again.call({ stage: 'planner', prompt, input: 'a new question', schema })).toEqual({ answer: 2 });
+    expect(second.calls).toHaveLength(1);
+    expect(again.usage().llmCalls).toMatchObject({ total: 2, cached: 1 });
+  });
+
   it('refuses to record with other ids than the cache was recorded with', async () => {
     await adapter('record', scripted([{ content: '{"answer":1}' }]).fetchImpl).call({ stage: 'planner', prompt, input: 'q', schema });
     const other = scripted([{ content: '{"answer":1}' }]);

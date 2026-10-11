@@ -22,14 +22,15 @@ export default defineConfig([
     },
   },
   {
-    // One adapter is the only door to the model, and only its callers may open it: the planner (and, later,
-    // rung 3, the re-planner and the RED explainer). run.ts and doctor.ts wire it up; the executor never can.
+    // One adapter is the only door to the model, and only its callers may open it: the planner, rung 3, the
+    // re-planner and the RED explainer. run.ts and doctor.ts wire it up; the executor never can.
     files: ['packages/engine/src/**/*.ts'],
     ignores: [
       'packages/engine/src/llm/**',
       'packages/engine/src/planner.ts',
       'packages/engine/src/resolver.ts',
       'packages/engine/src/replanner.ts',
+      'packages/engine/src/explain.ts',
       'packages/engine/src/run.ts',
       'packages/engine/src/doctor.ts',
       'packages/engine/src/**/*.test.ts',

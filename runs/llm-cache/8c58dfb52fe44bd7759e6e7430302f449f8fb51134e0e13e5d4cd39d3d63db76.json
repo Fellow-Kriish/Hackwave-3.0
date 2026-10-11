@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "8c58dfb52fe44bd7759e6e7430302f449f8fb51134e0e13e5d4cd39d3d63db76",
+  "stage": "explain",
+  "prompt": "explain",
+  "promptVersion": "explain/1",
+  "promptHash": "c7853d34408f9dd3f60e6fe437b58140f507fecba1789e92890aa0856a47ba44",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "8c3a4ae5d23be4ced124f83a5457a951fcc02876695f9df3e13d0ead29370b84",
+  "text": "{\"hypothesis\":\"The final page displays a confirmation for order ORD-4821, yet the orders store shows no new record, and the state‑delta check failed to see any insertion. This mismatch points most likely to the order creation layer – the POST endpoint or its persistence logic – because the UI believes the operation succeeded while the store remains unchanged. The first thing to investigate is the backend order‑creation handler and its database write path to see why the record is not being persisted.\"}",
+  "usage": {
+    "input": 595,
+    "output": 204
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T08:10:14.706Z"
+}
