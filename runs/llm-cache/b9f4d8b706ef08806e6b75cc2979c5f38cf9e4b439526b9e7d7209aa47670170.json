@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "b9f4d8b706ef08806e6b75cc2979c5f38cf9e4b439526b9e7d7209aa47670170",
+  "stage": "expand",
+  "prompt": "expand",
+  "promptVersion": "expand/11",
+  "promptHash": "77e37049dca1e32823c50d3ffadace758f83a5f46698a8112f48095f29d2c1cc",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "d9df54e8c7f5366d10359ffd48b86ec63165b6538efa13188ecceafa1f9cf978",
+  "text": "{\"milestones\":[{\"milestone\":\"payment\",\"steps\":[{\"key\":\"payment.card-number\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Card number\"},\"inputRef\":\"card.number\"},{\"key\":\"payment.expiry\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Expiry (MM/YY)\"},\"inputRef\":\"card.expiry\"},{\"key\":\"payment.cvv\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"CVV\"},\"inputRef\":\"card.cvv\"},{\"key\":\"payment.name\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Name on card\"},\"inputRef\":\"card.name\"}],\"more\":false}]}",
+  "usage": {
+    "input": 1595,
+    "output": 849
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T07:23:46.597Z"
+}

@@ -63,6 +63,19 @@ export function printEvent(event: EngineEvent): void {
     case 'milestone_started':
       line(`\n${bold(`▸ ${e.milestoneKey}`)}${e.terminal ? yellow(' (terminal)') : ''} ${dim(e.description)}`);
       break;
+    case 'milestone_skipped':
+      line(green(`\n✓ ${e.milestoneKey} already done, skipped (${e.detail})`));
+      break;
+    case 'milestone_reordered':
+      line(yellow(`\n↷ ${e.milestoneKey} before ${e.instead}: ${e.detail}`));
+      break;
+    case 'replan_started':
+      line(yellow(`  [rung 5] re-planning milestone ${e.milestoneKey} from ${e.stepKey}, attempt ${e.attempt} of ${e.maxAttempts}`));
+      break;
+    case 'replanned':
+      line(yellow(`  re-planned milestone ${e.milestoneKey}: ${(e.added as string[]).join('; ')}${e.more ? '; continues on the next screen' : ''}, attempt ${e.attempt} of ${e.maxAttempts}`));
+      line(dim(`      ${e.why}`));
+      break;
     case 'resolved': {
       const tag = e.rung === 1 ? cyan(`[rung 1]`) : yellow(`[rung ${e.rung}]`);
       const planned = e.rung > 1 ? dim(` (planned ${e.planned})`) : '';

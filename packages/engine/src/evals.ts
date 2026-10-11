@@ -28,10 +28,14 @@ const ExpectSchema = z.strictObject({
   healerBelievedDone: z.boolean().optional(),
   heals: z.number().int().nonnegative().optional(),
   replans: z.number().int().nonnegative().optional(),
+  /** At least this many rung-5 re-plans. */
+  minReplans: z.number().int().positive().optional(),
   maxLlmCalls: z.number().int().nonnegative().optional(),
   planSource: z.enum(['hand-written', 'cache', 'planner']).optional(),
   /** At least this many heals on each listed rung, e.g. {"2": 1, "3": 1}. */
   minHealsAtRung: z.partialRecord(z.enum(['2', '3', '4', '5']), z.number().int().positive()).optional(),
+  /** Each string appears in the run's report.md. */
+  reportIncludes: z.array(z.string()).optional(),
 });
 type Expect = z.infer<typeof ExpectSchema>;
 
@@ -47,15 +51,18 @@ const FixtureSchema = z.strictObject({
   /** Kill the private shop right after this step's action. */
   killAfterStep: z.string().optional(),
   plan: z.string().optional(),
-  /** Cache state before the run: empty (plan and locator caches cleared), after:<fixture> (left as that fixture left it). */
-  cache: z.string().optional(),
+  /**
+   * Cache state before the run: empty (plan and locator caches cleared), committed (as they were when the eval
+   * started, i.e. the committed files), after:<fixture> (left as that fixture left it).
+   */
+  cache: z.union([z.enum(['empty', 'committed']), z.string().regex(/^after:[a-z0-9-]+$/)]).optional(),
   /** Run once per provider that has a key and model in .env, in live mode; providers without one are skipped. */
   providerSwitch: z.boolean().default(false),
   expect: ExpectSchema,
 });
 type Fixture = z.infer<typeof FixtureSchema>;
 
-function compare(expect: Expect, verdict: Verdict, planSource: PlanSourceKind): string[] {
+function compare(expect: Expect, verdict: Verdict, planSource: PlanSourceKind, report: string): string[] {
   const problems: string[] = [];
   if (verdict.color !== expect.color) problems.push(`color ${verdict.color}, expected ${expect.color}`);
   if (expect.kind && verdict.kind !== expect.kind) problems.push(`kind ${verdict.kind}, expected ${expect.kind}`);
@@ -78,6 +85,12 @@ function compare(expect: Expect, verdict: Verdict, planSource: PlanSourceKind): 
   if (expect.replans !== undefined && verdict.replans.length !== expect.replans) {
     problems.push(`${verdict.replans.length} re-plans, expected ${expect.replans}`);
   }
+  if (expect.minReplans !== undefined && verdict.replans.length < expect.minReplans) {
+    problems.push(`${verdict.replans.length} re-plan(s), expected at least ${expect.minReplans}`);
+  }
+  for (const text of expect.reportIncludes ?? []) {
+    if (!report.includes(text)) problems.push(`report.md does not mention "${text}"`);
+  }
   if (expect.maxLlmCalls !== undefined && verdict.llmCalls.total > expect.maxLlmCalls) {
     problems.push(`${verdict.llmCalls.total} LLM calls, expected at most ${expect.maxLlmCalls}`);
   }
@@ -87,6 +100,11 @@ function compare(expect: Expect, verdict: Verdict, planSource: PlanSourceKind): 
   }
   if (expect.planSource !== undefined && planSource !== expect.planSource) problems.push(`plan came from ${planSource}, expected ${expect.planSource}`);
   return problems;
+}
+
+function readReport(runDir: string): string {
+  const file = join(runDir, 'report.md');
+  return existsSync(file) ? readFileSync(file, 'utf8') : '';
 }
 
 async function resetStore(origin: string): Promise<void> {
@@ -182,7 +200,15 @@ function restoreCaches(root: string, files: ReadonlyMap<string, string>): void {
  * verdict and the listed conditions. Any mismatch fails the eval; pending fixtures are listed until their phase.
  * Plan and locator caches are put back afterwards unless keepCaches is set; recorded model calls are kept.
  */
-export async function runEvals(options: { only?: string[]; verbose?: boolean; llmMode?: string; keepCaches?: boolean }): Promise<number> {
+export async function runEvals(options: {
+  only?: string[];
+  verbose?: boolean;
+  llmMode?: string;
+  keepCaches?: boolean;
+  /** Show each fixture's browser, optionally slowed down. */
+  headed?: boolean;
+  slowMo?: number;
+}): Promise<number> {
   const root = findRepoRoot();
   const config = loadConfig(root);
   const fixtures = loadFixtures(root);
@@ -191,11 +217,13 @@ export async function runEvals(options: { only?: string[]; verbose?: boolean; ll
   if (unknown.length > 0) throw new SetupError(`no fixture named ${unknown.map((name) => `"${name}"`).join(', ')}`);
   const selected = wanted.length > 0 ? fixtures.filter((fixture) => wanted.includes(fixture.name)) : fixtures;
   const modeOverride: Record<string, string> = options.llmMode ? { LLM_MODE: options.llmMode } : {};
-  const savedCaches = options.keepCaches ? null : snapshotCaches(root);
+  // Taken always: "committed" fixtures start from it. Put back at the end unless keepCaches.
+  const savedCaches = snapshotCaches(root);
   try {
-    return await runSelected(root, config, selected, modeOverride, options.verbose ?? false);
+    const view = { verbose: options.verbose ?? false, headed: options.headed ?? false, slowMo: options.slowMo ?? 0 };
+    return await runSelected(root, config, selected, modeOverride, view, savedCaches);
   } finally {
-    if (savedCaches) restoreCaches(root, savedCaches);
+    if (!options.keepCaches) restoreCaches(root, savedCaches);
   }
 }
 
@@ -204,10 +232,9 @@ async function runSelected(
   config: EngineConfig,
   selected: Fixture[],
   modeOverride: Record<string, string>,
-  verbose: boolean,
+  options: { verbose: boolean; headed: boolean; slowMo: number },
+  committed: ReadonlyMap<string, string>,
 ): Promise<number> {
-  const options = { verbose };
-
   console.log(bold(`eval: ${selected.length} fixture(s)`));
   let passed = 0;
   let failed = 0;
@@ -253,6 +280,8 @@ async function runSelected(
         if (fixture.cache === 'empty') {
           for (const file of [cacheFile, locatorCacheFile(root, intentId), locatorCacheFile(root, intentId, true)]) rmSync(file, { force: true });
         }
+        // The committed caches are the state after act 1 (v1 planned and warmed) until P6 adds snapshots.
+        if (fixture.cache === 'committed') restoreCaches(root, committed);
         const killAfter = fixture.killAfterStep;
         const privateShop = shop;
         return runIntent({
@@ -260,6 +289,8 @@ async function runSelected(
           target: origin,
           planFile: fixture.plan ? join(root, fixture.plan) : undefined,
           quiet: !options.verbose,
+          headed: options.headed,
+          slowMo: options.slowMo,
           envOverride,
           afterAction: killAfter
             ? async (stepKey) => {
@@ -271,7 +302,7 @@ async function runSelected(
 
       if (!fixture.providerSwitch) {
         const result = await run(modeOverride);
-        const problems = compare(fixture.expect, result.verdict, result.planSource);
+        const problems = compare(fixture.expect, result.verdict, result.planSource, readReport(result.runDir));
         if (problems.length === 0) passed++;
         else failed++;
         report(fixture.name, result, problems, started);
@@ -308,7 +339,7 @@ async function runSelected(
             LLM_API_KEY_FAST: '',
             LLM_BASE_URL: profile.baseUrl ?? '',
           });
-          const problems = compare(fixture.expect, result.verdict, result.planSource);
+          const problems = compare(fixture.expect, result.verdict, result.planSource, readReport(result.runDir));
           if (problems.length > 0) switchFailed = true;
           report(`${fixture.name}[${profile.provider}]`, result, problems, providerStarted);
         }

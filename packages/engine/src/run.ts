@@ -26,6 +26,7 @@ import { findRepoRoot } from './paths';
 import { cacheablePlan, loadCachedPlan, planCacheFile, savePlanCache } from './plan-cache';
 import { createPlanner, planPromptHash } from './planner';
 import { printFinalBlock, renderReport } from './report';
+import { createReplanner } from './replanner';
 import { createRung3Picker } from './resolver';
 import { createRunDir } from './run-dir';
 import { Timings } from './timing';
@@ -109,6 +110,7 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
 
   const prompts = asSetupError(() => ({ plan: loadPrompt(root, 'planner'), expand: loadPrompt(root, 'expand') }));
   const resolvePrompt = asSetupError(() => loadPrompt(root, 'resolve'));
+  const replanPrompt = asSetupError(() => loadPrompt(root, 'replan'));
   const promptHash = planPromptHash(prompts);
   let plan: Plan | null;
   let planSource: PlanSourceKind;
@@ -178,7 +180,10 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
     timings,
     rejectDir: join(runDir, 'llm-rejected'),
   });
-  const planner = planSource === 'hand-written' ? undefined : createPlanner({ llm, prompts, healer, inputValues: inputs, goalHash, tree: config.tree });
+  // Hand-written plans get the planner too, but only ever for a re-planned milestone that continues on a later
+  // screen: they arrive fully expanded and are never written to the plan cache.
+  const planner = createPlanner({ llm, prompts, healer, inputValues: inputs, goalHash, tree: config.tree });
+  const replanner = createReplanner({ llm, prompt: replanPrompt, healer, inputValues: inputs, tree: config.tree });
   const locators = LocatorCache.load(root, intent.id, planSource === 'hand-written');
   const locatorsLabel = relative(root, locators.file).replace(/\\/g, '/');
   if (locators.problem) events.emit('locator_cache_ignored', { file: locatorsLabel, reason: locators.problem });
@@ -235,8 +240,10 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
             environmentErrors: [],
             heals: [],
             reusedHealsFrom: [],
+            replans: [],
             plan,
             expanded: [],
+            replanned: [],
             completed: [],
           },
         );
@@ -256,6 +263,7 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
         ladder: config.ladder,
         locators,
         picker,
+        replanner,
         runId,
         events,
         timings,
@@ -267,11 +275,12 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
       hung,
     ]).finally(() => clearTimeout(watchdog));
 
-    const { plan: executedPlan, expanded, completed, reusedHealsFrom, ...outcome } = execution;
+    const { plan: executedPlan, expanded, replanned, completed, reusedHealsFrom, ...outcome } = execution;
     writeJson('plan-used.json', executedPlan);
-    if (planner && executedPlan && (planSource === 'planner' || expanded.length > 0)) {
-      const file = savePlanCache(root, cacheablePlan(executedPlan, expanded, completed));
-      events.emit('plan_cached', { file: relative(root, file).replace(/\\/g, '/'), expanded, completed });
+    // Planned and re-planned steps go to the plan cache, so the next run needs no model; hand plans never do.
+    if (planSource !== 'hand-written' && executedPlan && (planSource === 'planner' || expanded.length > 0 || replanned.length > 0)) {
+      const file = savePlanCache(root, cacheablePlan(executedPlan, expanded, completed, { keys: replanned, original: plan }));
+      events.emit('plan_cached', { file: relative(root, file).replace(/\\/g, '/'), expanded, replanned, completed });
     }
     // The fix the system emits: heals are written to the locator cache for review; the next run hits rung 1.
     const locatorsUpdated = locators.updatedKeys();
@@ -285,7 +294,6 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
       startedAt,
       endedAt: new Date().toISOString(),
       ...outcome,
-      replans: [],
       llmCalls: usage.llmCalls,
       tokens: usage.tokens,
       timings: timings.summary(),

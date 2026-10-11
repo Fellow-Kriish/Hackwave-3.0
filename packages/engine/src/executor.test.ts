@@ -209,6 +209,20 @@ describe('on a real page', () => {
     expect(
       await checkProgress({ page, step: click, locator: null, value: null, before: still, after: still, nextTarget: { role: 'heading', name: 'Shoes' } }),
     ).toMatchObject({ ok: true, detail: 'next target is visible' });
+
+    // Only a live region changed: a status message is progress, a validation alert is not.
+    await page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<p role="status">Added to cart</p>'));
+    const withStatus = await capturePage(page);
+    expect(await checkProgress({ page, step: click, locator: null, value: null, before: still, after: withStatus, nextTarget: null })).toEqual({
+      ok: true,
+      detail: 'a status message changed',
+    });
+    await page.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<p role="alert">Phone is required</p>'));
+    const withAlert = await capturePage(page);
+    expect(await checkProgress({ page, step: click, locator: null, value: null, before: withStatus, after: withAlert, nextTarget: { role: 'heading', name: 'Shoes' } })).toEqual({
+      ok: false,
+      detail: 'the page only showed an alert: "Phone is required"',
+    });
   });
 
   it('reads milestone completion from the aria tree', async () => {

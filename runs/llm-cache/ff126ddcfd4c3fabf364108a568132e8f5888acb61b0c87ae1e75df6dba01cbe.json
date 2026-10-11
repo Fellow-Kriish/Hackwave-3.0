@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "ff126ddcfd4c3fabf364108a568132e8f5888acb61b0c87ae1e75df6dba01cbe",
+  "stage": "replanner",
+  "prompt": "replan",
+  "promptVersion": "replan/1",
+  "promptHash": "a296606dff123571138c7235d114a1dfab2e6e7ba0e2aa15405bbc592cbaa406",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "bb10af4d1f6db85d763e47f55c26ead94d1bb71fbf5896b9e03467bcf9fd4225",
+  "text": "{\"steps\":[{\"key\":\"payment.phone\",\"action\":\"fill\",\"target\":{\"role\":\"textbox\",\"name\":\"Phone\"},\"inputRef\":\"shipping.phone\"},{\"key\":\"payment.continue\",\"action\":\"click\",\"target\":{\"role\":\"button\",\"name\":\"Continue to payment\"}}],\"more\":true,\"reason\":\"Credit‑card fields moved to the next screen; fill the required Phone field and click Continue to payment to reach the payment page\"}",
+  "usage": {
+    "input": 1506,
+    "output": 590
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T07:22:55.790Z"
+}

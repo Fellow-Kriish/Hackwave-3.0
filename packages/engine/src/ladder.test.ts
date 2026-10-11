@@ -16,7 +16,7 @@ import type { FetchLike } from './llm/providers';
 import { resolveLlmSettings } from './llm/settings';
 import { LocatorCache, type LocatorCacheEntry } from './locator-cache';
 import { findRepoRoot } from './paths';
-import { createRung3Picker } from './resolver';
+import { createRung3Picker, type Rung3Picker, type Rung3Request } from './resolver';
 import { nameSimilarity, normalizeName, setOverlap } from './similarity';
 import { Timings } from './timing';
 import { loadPrompt } from './llm';
@@ -142,6 +142,19 @@ describe('ladder on real pages', () => {
     expect((await ladderFor().rung2(expectation)).reason).toMatch(/only 0 ahead/);
   });
 
+  it('never offers an element an earlier step already acted on, on this screen', async () => {
+    await page.setContent(V2);
+    const cartOpen: Step = { key: 'cart.open', action: 'click', target: { role: 'button', name: 'Cart ({n})', synonyms: [] } };
+    const expectation = expectationFor(cartOpen, undefined, inputs);
+    if (!expectation) throw new Error('unreachable');
+    const used = [{ role: 'button', name: 'Add to cart', within: { role: 'article', name: 'Trail Runner' } }];
+    const names = (await ladderFor().candidatesFor(expectation, used)).candidates.map((candidate) => `${candidate.name} @ ${candidate.container?.name ?? '-'}`);
+    expect(names).not.toContain('Add to cart @ Trail Runner');
+    expect(names).toContain('Add to cart @ City Sneaker');
+    expect(names).toContain('Your bag @ Main');
+    expect((await ladderFor().rung2(expectation, used)).candidates.map((candidate) => candidate.id)).toEqual(names.map((_, index) => `c${index + 1}`));
+  });
+
   it('never looks outside a scope named after an input', async () => {
     await page.setContent(V2);
     const expectation = expectationFor(addStep, undefined, { product: 'Moon Boot' });
@@ -251,6 +264,45 @@ describe('executor heals and writes the fix', () => {
       await browser.close();
     }
   }
+
+  it('rung 3 is never offered the element the previous step just clicked, and is told what that step was', async () => {
+    html = V2;
+    const cartOpen: Step = { key: 'cart.open', action: 'click', target: { role: 'button', name: 'Cart ({n})', synonyms: [] } };
+    const twoSteps = parsePlan({ ...plan, milestones: [{ key: 'cart', description: 'Add the product to the cart and open the cart.', completion: { kind: 'heading', text: 'Shoes' }, steps: [addStep, cartOpen] }] });
+    const asked: Rung3Request[] = [];
+    const picker: Rung3Picker = {
+      async pick(_page, requests) {
+        asked.push(...requests);
+        // A careless picker: the first candidate whose name mentions the cart.
+        return new Map(requests.map((request) => [request.expectation.stepKey, request.candidates.find((candidate) => /cart|bag/i.test(candidate.name)) ?? null]));
+      },
+    };
+    const browser = await chromium.launch();
+    try {
+      const page = await (await browser.newContext()).newPage();
+      await execute({
+        page,
+        origin,
+        startUrl: `${origin}/`,
+        plan: twoSteps,
+        healer: { id: 'heal-test', goal: 'g', inputKeys: ['product'] },
+        inputs,
+        budgets: config.budgets,
+        settle: { sampleGapMs: 50, maxWaitMs: 500 },
+        ladder: config.ladder,
+        locators: LocatorCache.load(dir, 'rung3-avoid'),
+        picker,
+        runId: 'rung3-avoid',
+        events: new EventLog(join(dir, 'rung3-avoid.jsonl')),
+        timings: new Timings(),
+      });
+    } finally {
+      await browser.close();
+    }
+    const request = asked.find((candidate) => candidate.expectation.stepKey === 'cart.open');
+    expect(request?.candidates.some((candidate) => candidate.name === 'Add to cart' && candidate.container?.name === 'Trail Runner')).toBe(false);
+    expect(request?.purpose).toBe('click button "Cart ({n})", right after cart.add (click button "Add to cart" in article "{product}"); part of milestone cart: Add the product to the cart and open the cart.');
+  }, 30_000);
 
   it('caches the first success, heals on rung 2 after a redesign, then resolves on rung 1', async () => {
     html = V1;

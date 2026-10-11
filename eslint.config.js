@@ -29,6 +29,7 @@ export default defineConfig([
       'packages/engine/src/llm/**',
       'packages/engine/src/planner.ts',
       'packages/engine/src/resolver.ts',
+      'packages/engine/src/replanner.ts',
       'packages/engine/src/run.ts',
       'packages/engine/src/doctor.ts',
       'packages/engine/src/**/*.test.ts',

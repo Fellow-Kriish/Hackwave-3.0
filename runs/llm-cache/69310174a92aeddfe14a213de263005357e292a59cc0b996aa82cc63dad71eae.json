@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "69310174a92aeddfe14a213de263005357e292a59cc0b996aa82cc63dad71eae",
+  "stage": "resolver",
+  "prompt": "resolve",
+  "promptVersion": "resolve/2",
+  "promptHash": "f10e8ee6245d109226080a579ceb8ceee80181710fa304f6a74a62be239b89ac",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "28a0857fd34a4b5896f53eda04859cb166cb73ba506b3ee2d153a5c3bd6a8a76",
+  "text": "{\"steps\":[{\"step\":\"payment.card-number\",\"candidate\":null},{\"step\":\"payment.expiry\",\"candidate\":null},{\"step\":\"payment.cvv\",\"candidate\":null},{\"step\":\"payment.name\",\"candidate\":null}]}",
+  "usage": {
+    "input": 1100,
+    "output": 235
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T07:23:41.170Z"
+}

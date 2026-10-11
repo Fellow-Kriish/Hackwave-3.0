@@ -139,6 +139,22 @@ export function valueOwnersOf(inputs: Readonly<Record<string, string>>): Map<str
   return new Map(Object.entries(inputs).map(([key, value]) => [value.trim().toLowerCase(), key]));
 }
 
+/** Values shorter than this are left alone: replacing "1" or "12" everywhere would garble the text, not protect it. */
+const MIN_REDACTED_LENGTH = 3;
+
+/**
+ * Free text from the page or the run (an alert, a failure reason) with every input value replaced by {key},
+ * so it can be logged or put into a prompt. Longest values first, case-insensitive.
+ */
+export function redactValues(text: string, valueOwners: ReadonlyMap<string, string>): string {
+  let redacted = text;
+  for (const [value, key] of [...valueOwners].sort(([a], [b]) => b.length - a.length)) {
+    if (value.length < MIN_REDACTED_LENGTH) continue;
+    redacted = redacted.replace(new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), `{${key}}`);
+  }
+  return redacted;
+}
+
 /** "(= input product)" when a name on screen is the value of an input, so a model can use the key. */
 export function inputMark(name: string, valueOwners: ReadonlyMap<string, string>): string {
   const owner = valueOwners.get(name.trim().toLowerCase());

@@ -188,8 +188,21 @@ export function createLadder(options: LadderOptions) {
     return Math.round((0.8 * name + 0.1 * sameLandmark + 0.1 * siblings) * 1000) / 1000;
   }
 
-  /** Visible, named elements of the expected role: inside the scope first, the whole page only if the scope is optional. */
-  async function candidatesFor(expectation: Expectation): Promise<{ candidates: ScoredCandidate[]; scopeMissing: boolean }> {
+  /** Would this candidate be the element a target names? Same role and name, in the same named container. */
+  function isSameElement(candidate: ScoredCandidate, target: ConcreteTarget, expectation: Expectation): boolean {
+    if (candidate.fingerprint.role !== target.role || candidate.name !== target.name) return false;
+    const within = target.within;
+    if (!within) return true;
+    const inside = (box: { role: string; name: string } | null | undefined) => box?.role === within.role && box.name === within.name;
+    return inside(candidate.container) || (candidate.inScope && inside(expectation.scope));
+  }
+
+  /**
+   * Visible, named elements of the expected role: inside the scope first, the whole page only if the scope is
+   * optional. Elements in avoid (what earlier steps already acted on, on this screen) are never candidates:
+   * healing onto one would repeat that step, e.g. add the product to the cart twice.
+   */
+  async function candidatesFor(expectation: Expectation, avoid: readonly ConcreteTarget[] = []): Promise<{ candidates: ScoredCandidate[]; scopeMissing: boolean }> {
     let root: Page | Locator = page;
     let inScope = false;
     let scopeMissing = false;
@@ -213,8 +226,9 @@ export function createLadder(options: LadderOptions) {
       }
       return found;
     };
-    let candidates = await collect(root, inScope);
-    if (candidates.length === 0 && inScope && !expectation.scope?.required) candidates = await collect(page, false);
+    const fresh = (found: ScoredCandidate[]) => found.filter((candidate) => !avoid.some((target) => isSameElement(candidate, target, expectation)));
+    let candidates = fresh(await collect(root, inScope));
+    if (candidates.length === 0 && inScope && !expectation.scope?.required) candidates = fresh(await collect(page, false));
     candidates.sort((a, b) => b.score - a.score);
     candidates.forEach((candidate, index) => (candidate.id = `c${index + 1}`));
     return { candidates, scopeMissing };
@@ -268,10 +282,9 @@ export function createLadder(options: LadderOptions) {
    * Rung 2: score candidates by name similarity (step name, synonyms, cached name) plus fingerprint boosts
    * (same landmark, same nearby text). Accept the best only above the threshold and clearly ahead of the next.
    */
-  async function rung2(expectation: Expectation, exclude: ConcreteTarget | null = null): Promise<Rung2Outcome> {
+  async function rung2(expectation: Expectation, avoid: readonly ConcreteTarget[] = []): Promise<Rung2Outcome> {
     const started = performance.now();
-    const { candidates: all, scopeMissing } = await candidatesFor(expectation);
-    const candidates = exclude ? all.filter((candidate) => candidate.name !== exclude.name) : all;
+    const { candidates, scopeMissing } = await candidatesFor(expectation, avoid);
     const fail = (reason: string): Rung2Outcome => ({
       ok: false,
       rung: 2,

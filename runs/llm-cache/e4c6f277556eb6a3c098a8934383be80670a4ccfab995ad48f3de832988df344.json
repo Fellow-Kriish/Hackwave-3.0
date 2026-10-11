@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "e4c6f277556eb6a3c098a8934383be80670a4ccfab995ad48f3de832988df344",
+  "stage": "resolver",
+  "prompt": "resolve",
+  "promptVersion": "resolve/2",
+  "promptHash": "f10e8ee6245d109226080a579ceb8ceee80181710fa304f6a74a62be239b89ac",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "4f008b17d5c60b122e67de5033d7b279b1aadc812274991cd1b8e1665d8d91aa",
+  "text": "{\"steps\":[{\"step\":\"place-order.submit\",\"candidate\":\"c1\"}]}",
+  "usage": {
+    "input": 764,
+    "output": 180
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T07:23:54.950Z"
+}

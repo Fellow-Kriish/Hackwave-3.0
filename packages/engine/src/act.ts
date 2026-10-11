@@ -75,7 +75,14 @@ export async function checkProgress(input: ProgressInput): Promise<ProgressCheck
     }
     case 'change': {
       if (after.url !== before.url) return { ok: true, detail: `url changed to ${new URL(after.url).pathname}` };
-      if (after.fullHash !== before.fullHash) return { ok: true, detail: 'page changed' };
+      if (after.stableHash !== before.stableHash) return { ok: true, detail: 'page changed' };
+      if (after.fullHash !== before.fullHash) {
+        // Only a live region changed. A status message is progress; an alert (a validation error) is not: the
+        // page is asking for something the plan did not do, such as a new required field.
+        const alerts = (await page.getByRole('alert').filter({ visible: true }).allInnerTexts()).map((text) => text.trim()).filter(Boolean);
+        if (alerts.length === 0) return { ok: true, detail: 'a status message changed' };
+        return { ok: false, detail: `the page only showed an alert: ${alerts.map((text) => `"${text}"`).join(', ')}` };
+      }
       if (nextTarget && (await buildLocator(page, nextTarget).locator.filter({ visible: true }).count()) > 0) {
         return { ok: true, detail: 'next target is visible' };
       }

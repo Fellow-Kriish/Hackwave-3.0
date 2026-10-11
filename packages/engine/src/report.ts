@@ -1,6 +1,7 @@
 import type { RunRecord, Verdict } from '@hackwave/contracts';
 import type { EngineConfig } from './config';
 import { bold, dim, green, red, yellow } from './console';
+import { describeStep } from './step-rules';
 
 export interface ReportContext {
   config: EngineConfig;
@@ -45,6 +46,32 @@ function healSection(verdict: Verdict, context: ReportContext): string[] {
     '',
     ...verdict.heals.map((heal) => `- \`${heal.stepKey}\`: ${heal.reason}`),
     '',
+  ];
+}
+
+/** Each rung-5 re-plan: why, and the milestone's replaced steps against the new ones. */
+function replanSection(verdict: Verdict, context: ReportContext): string[] {
+  if (verdict.replans.length === 0) return [];
+  const where =
+    context.planSource === 'hand-written'
+      ? 'Hand-written plans are never cached: these re-plans applied to this run only.'
+      : `The plan cache \`${context.planFile}\` keeps the re-planned steps of every milestone that then ran through; review the diff and commit it.`;
+  return [
+    '## Re-plans',
+    '',
+    where,
+    '',
+    ...verdict.replans.flatMap((replan) => [
+      `### ${replan.milestoneKey}, attempt ${replan.attempt}`,
+      '',
+      `Why: ${replan.reason}`,
+      '',
+      '```diff',
+      ...replan.oldSteps.map((step) => `- ${step.key}: ${describeStep(step)}`),
+      ...replan.newSteps.map((step) => `+ ${step.key}: ${describeStep(step)}`),
+      '```',
+      '',
+    ]),
   ];
 }
 
@@ -130,6 +157,7 @@ export function renderReport(verdict: Verdict, context: ReportContext): string {
     ),
     '',
     ...healSection(verdict, context),
+    ...replanSection(verdict, context),
     '## Run',
     '',
     `- Outcome: ${record.outcome}${record.reason ? ` (${record.reason.code}: ${record.reason.message})` : ''}; terminal action ${record.terminalAttempted ? 'attempted once' : 'never attempted'}`,
@@ -164,6 +192,9 @@ export function printFinalBlock(verdict: Verdict, context: ReportContext): void 
   for (const heal of verdict.heals) {
     const after = locatorText(heal.from) === locatorText(heal.to) ? 'same locator, element moved' : locatorText(heal.to);
     console.log(yellow(`  heal: ${heal.stepKey} ${locatorText(heal.from)} → ${after} (rung ${heal.rung})`));
+  }
+  for (const replan of verdict.replans) {
+    console.log(yellow(`  re-plan: ${replan.milestoneKey} attempt ${replan.attempt}: ${replan.newSteps.map(describeStep).join('; ')}`));
   }
   if (verdict.heals.length === 0 && context.reusedHealsFrom.length > 0) {
     console.log(dim(`  locators healed earlier by run ${context.reusedHealsFrom.join(', ')} resolved on rung 1`));
