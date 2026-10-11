@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { VerdictColorSchema, VerdictKindSchema, type Verdict } from '@hackwave/contracts';
 import { z } from 'zod';
 import { loadConfig, type EngineConfig } from './config';
 import { bold, dim, green, red, yellow } from './console';
 import { loadIntent } from './load';
+import { locatorCacheFile } from './locator-cache';
 import { findRepoRoot } from './paths';
 import { planCacheFile } from './plan-cache';
 import { banner, healerLine } from './report';
@@ -29,6 +30,8 @@ const ExpectSchema = z.strictObject({
   replans: z.number().int().nonnegative().optional(),
   maxLlmCalls: z.number().int().nonnegative().optional(),
   planSource: z.enum(['hand-written', 'cache', 'planner']).optional(),
+  /** At least this many heals on each listed rung, e.g. {"2": 1, "3": 1}. */
+  minHealsAtRung: z.partialRecord(z.enum(['2', '3', '4', '5']), z.number().int().positive()).optional(),
 });
 type Expect = z.infer<typeof ExpectSchema>;
 
@@ -44,7 +47,7 @@ const FixtureSchema = z.strictObject({
   /** Kill the private shop right after this step's action. */
   killAfterStep: z.string().optional(),
   plan: z.string().optional(),
-  /** Cache state before the run: empty (plan cache cleared), after:<fixture> (left as that fixture left it). */
+  /** Cache state before the run: empty (plan and locator caches cleared), after:<fixture> (left as that fixture left it). */
   cache: z.string().optional(),
   /** Run once per provider that has a key and model in .env, in live mode; providers without one are skipped. */
   providerSwitch: z.boolean().default(false),
@@ -77,6 +80,10 @@ function compare(expect: Expect, verdict: Verdict, planSource: PlanSourceKind): 
   }
   if (expect.maxLlmCalls !== undefined && verdict.llmCalls.total > expect.maxLlmCalls) {
     problems.push(`${verdict.llmCalls.total} LLM calls, expected at most ${expect.maxLlmCalls}`);
+  }
+  for (const [rung, minimum] of Object.entries(expect.minHealsAtRung ?? {})) {
+    const count = verdict.heals.filter((heal) => String(heal.rung) === rung).length;
+    if (count < (minimum ?? 0)) problems.push(`${count} heal(s) on rung ${rung}, expected at least ${minimum}`);
   }
   if (expect.planSource !== undefined && planSource !== expect.planSource) problems.push(`plan came from ${planSource}, expected ${expect.planSource}`);
   return problems;
@@ -145,17 +152,61 @@ export function switchProfiles(config: EngineConfig, env: Readonly<Record<string
   });
 }
 
+const CACHE_DIRS = [join('runs', 'plans'), join('runs', 'locators')];
+
+/** The committed plan and locator caches, so an eval run can put them back exactly as it found them. */
+function snapshotCaches(root: string): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const dir of CACHE_DIRS) {
+    const full = join(root, dir);
+    if (!existsSync(full)) continue;
+    for (const name of readdirSync(full)) files.set(join(full, name), readFileSync(join(full, name), 'utf8'));
+  }
+  return files;
+}
+
+function restoreCaches(root: string, files: ReadonlyMap<string, string>): void {
+  for (const dir of CACHE_DIRS) {
+    const full = join(root, dir);
+    if (!existsSync(full)) continue;
+    for (const name of readdirSync(full)) if (!files.has(join(full, name))) rmSync(join(full, name), { force: true });
+  }
+  for (const [file, content] of files) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, content);
+  }
+}
+
 /**
  * The test for the test tool: reset the target store, set the cache state, run the intent, compare the
  * verdict and the listed conditions. Any mismatch fails the eval; pending fixtures are listed until their phase.
+ * Plan and locator caches are put back afterwards unless keepCaches is set; recorded model calls are kept.
  */
-export async function runEvals(options: { only?: string; verbose?: boolean; llmMode?: string }): Promise<number> {
+export async function runEvals(options: { only?: string[]; verbose?: boolean; llmMode?: string; keepCaches?: boolean }): Promise<number> {
   const root = findRepoRoot();
   const config = loadConfig(root);
   const fixtures = loadFixtures(root);
-  const selected = options.only ? fixtures.filter((fixture) => fixture.name === options.only) : fixtures;
-  if (selected.length === 0) throw new SetupError(`no fixture named "${options.only ?? ''}"`);
-  const modeOverride = options.llmMode ? { LLM_MODE: options.llmMode } : {};
+  const wanted = options.only ?? [];
+  const unknown = wanted.filter((name) => !fixtures.some((fixture) => fixture.name === name));
+  if (unknown.length > 0) throw new SetupError(`no fixture named ${unknown.map((name) => `"${name}"`).join(', ')}`);
+  const selected = wanted.length > 0 ? fixtures.filter((fixture) => wanted.includes(fixture.name)) : fixtures;
+  const modeOverride: Record<string, string> = options.llmMode ? { LLM_MODE: options.llmMode } : {};
+  const savedCaches = options.keepCaches ? null : snapshotCaches(root);
+  try {
+    return await runSelected(root, config, selected, modeOverride, options.verbose ?? false);
+  } finally {
+    if (savedCaches) restoreCaches(root, savedCaches);
+  }
+}
+
+async function runSelected(
+  root: string,
+  config: EngineConfig,
+  selected: Fixture[],
+  modeOverride: Record<string, string>,
+  verbose: boolean,
+): Promise<number> {
+  const options = { verbose };
 
   console.log(bold(`eval: ${selected.length} fixture(s)`));
   let passed = 0;
@@ -199,7 +250,9 @@ export async function runEvals(options: { only?: string; verbose?: boolean; llmM
       }
       const run = async (envOverride: Record<string, string | undefined>) => {
         await resetStore(origin);
-        if (fixture.cache === 'empty') rmSync(cacheFile, { force: true });
+        if (fixture.cache === 'empty') {
+          for (const file of [cacheFile, locatorCacheFile(root, intentId), locatorCacheFile(root, intentId, true)]) rmSync(file, { force: true });
+        }
         const killAfter = fixture.killAfterStep;
         const privateShop = shop;
         return runIntent({

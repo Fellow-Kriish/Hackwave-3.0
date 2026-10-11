@@ -28,6 +28,7 @@ export default defineConfig([
     ignores: [
       'packages/engine/src/llm/**',
       'packages/engine/src/planner.ts',
+      'packages/engine/src/resolver.ts',
       'packages/engine/src/run.ts',
       'packages/engine/src/doctor.ts',
       'packages/engine/src/**/*.test.ts',
@@ -43,6 +44,26 @@ export default defineConfig([
             },
           ],
         },
+      ],
+    },
+  },
+  {
+    // Functions passed to the page are serialized with String(fn). tsx compiles with esbuild's keepNames, which
+    // wraps every named function or class in __name(), a helper that exists in Node but not in the page.
+    files: ['packages/engine/src/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...[
+          'VariableDeclarator > :function',
+          'AssignmentExpression > :function.right',
+          'AssignmentPattern > :function.right',
+          'Property > :function',
+          ':matches(FunctionDeclaration, ClassDeclaration, ClassExpression)',
+        ].map((inner) => ({
+          selector: `CallExpression[callee.property.name=/^(evaluate|evaluateAll|evaluateHandle|waitForFunction|addInitScript)$/] ${inner}`,
+          message: 'No named functions or classes inside a page function: under tsx they call __name(), which the page does not have. Inline the helper.',
+        })),
       ],
     },
   },

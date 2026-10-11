@@ -63,16 +63,34 @@ export function printEvent(event: EngineEvent): void {
     case 'milestone_started':
       line(`\n${bold(`▸ ${e.milestoneKey}`)}${e.terminal ? yellow(' (terminal)') : ''} ${dim(e.description)}`);
       break;
-    case 'resolved':
-      line(`  ${cyan(`[rung ${e.rung}]`)} resolved ${e.stepKey} via rung ${e.rung}: ${e.action} ${e.target} (${e.ms} ms)`);
-      break;
-    case 'unresolved': {
-      const flags = Object.entries(e.validation as Record<string, boolean>)
-        .map(([flag, ok]) => `${flag} ${ok ? '✓' : '✗'}`)
-        .join(', ');
-      line(red(`  [rung ${e.rung}] could not resolve ${e.stepKey}: ${e.target} ${e.reason} (${flags})`));
+    case 'resolved': {
+      const tag = e.rung === 1 ? cyan(`[rung 1]`) : yellow(`[rung ${e.rung}]`);
+      const planned = e.rung > 1 ? dim(` (planned ${e.planned})`) : '';
+      line(`  ${tag} resolved ${e.stepKey} via rung ${e.rung}: ${e.action} ${e.target}${planned} (${e.ms} ms)`);
       break;
     }
+    case 'unresolved':
+      line(red(`  could not resolve ${e.stepKey}: ${e.target}`));
+      for (const failure of e.failures as string[]) line(red(`      ${failure}`));
+      break;
+    case 'healed': {
+      const flags = Object.entries(e.validation as Record<string, boolean>)
+        .filter(([, ok]) => ok)
+        .map(([flag]) => flag)
+        .join(', ');
+      const change = e.moved ? `${e.fromText} ${e.moved}` : `${e.fromText} became ${e.toText}`;
+      line(yellow(`  healed ${e.stepKey}: ${change}, rung ${e.rung}, validated ${flags} (${seconds(e.ms)})`));
+      break;
+    }
+    case 'heal_rejected':
+      line(red(`  heal rejected for ${e.stepKey}: ${e.target} (rung ${e.rung}) acted without effect: ${e.detail}`));
+      break;
+    case 'locators_saved':
+      line(dim(`locator cache updated: ${e.file} (${(e.updated as string[]).length} entr${(e.updated as string[]).length === 1 ? 'y' : 'ies'})`));
+      break;
+    case 'locator_cache_ignored':
+      line(yellow(`note: ignoring ${e.file}: ${e.reason}`));
+      break;
     case 'terminal_attempted':
       line(yellow(`  ⚑ terminal action ${e.stepKey}: runs once, then straight to the verifier`));
       break;

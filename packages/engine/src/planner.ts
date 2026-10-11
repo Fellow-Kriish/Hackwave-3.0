@@ -14,7 +14,7 @@ import type { Page } from 'playwright';
 import { z } from 'zod';
 import type { LlmAdapter, PromptFile } from './llm';
 import { namePattern } from './resolve';
-import { pruneAriaSnapshot, type PrunedTree } from './tree';
+import { screenTree, valueOwnersOf } from './tree';
 
 /** Steps written for one milestone on one screen; more means it continues on a later screen. */
 export interface Expansion {
@@ -71,33 +71,16 @@ function describeStep(step: Step): string {
   return `${step.action} ${target.role} "${name}"${within}${input}`;
 }
 
-/**
- * The pruned tree, with names that equal an input value marked "(= input <key>)". The name is already on the
- * screen, so nothing new is revealed; the mark only tells the model which key to use as nameRef.
- */
-async function screenOf(page: Page, limits: PlannerOptions['tree'], valueOwners: ReadonlyMap<string, string>): Promise<{ path: string; tree: PrunedTree }> {
-  const snapshot = await page.locator('body').ariaSnapshot({ timeout: 3000 });
-  const pruned = pruneAriaSnapshot(snapshot, limits);
-  const text = pruned.text
-    .split('\n')
-    .map((line) => {
-      const name = /^\s*- [a-z]+ "((?:[^"\\]|\\.)*)"/.exec(line)?.[1];
-      const owner = name === undefined ? undefined : valueOwners.get(name.trim().toLowerCase());
-      return owner ? `${line} (= input ${owner})` : line;
-    })
-    .join('\n');
-  return { path: new URL(page.url()).pathname, tree: { ...pruned, text } };
-}
-
 export function createPlanner(options: PlannerOptions): PlanSource {
   const { llm, prompts, healer } = options;
   const inputKeys = healer.inputKeys;
   const promptHash = planPromptHash(prompts);
-  const valueOwners = new Map(Object.entries(options.inputValues).map(([key, value]) => [value.trim().toLowerCase(), key]));
+  const valueOwners = valueOwnersOf(options.inputValues);
+  const screenOf = (page: Page) => screenTree(page, options.tree, valueOwners);
 
   return {
     async plan(page) {
-      const { path, tree } = await screenOf(page, options.tree, valueOwners);
+      const { path, tree } = await screenOf(page);
       const base = { intentId: healer.id, goalHash: options.goalHash, promptHash, createdAt: new Date().toISOString() };
       const schema = z
         .strictObject({
@@ -127,7 +110,7 @@ export function createPlanner(options: PlannerOptions): PlanSource {
     },
 
     async expand(page, pending, done, commit) {
-      const { path, tree } = await screenOf(page, options.tree, valueOwners);
+      const { path, tree } = await screenOf(page);
       const known = new Set(inputKeys);
       const taken = new Set(done.map((step) => step.key));
       const schema = z

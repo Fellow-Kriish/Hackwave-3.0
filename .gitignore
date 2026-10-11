@@ -16,6 +16,8 @@ runs/*
 !runs/locators/
 !runs/llm-cache/
 !runs/snapshots/
+# hand-written plans heal into a scratch cache that is never committed
+runs/locators/*.hand.json
 
 test-results/
 playwright-report/

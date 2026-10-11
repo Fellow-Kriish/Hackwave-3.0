@@ -4,6 +4,7 @@ import {
   isExpanded,
   sameTarget,
   type Budgets,
+  type HealEvent,
   type HealerDone,
   type HealerIntent,
   type Milestone,
@@ -18,12 +19,18 @@ import { checkProgress, perform } from './act';
 import { checkAllowed, sameOrigin } from './allowlist';
 import type { PageState } from './aria';
 import { completionHolds } from './completion';
+import type { EngineConfig } from './config';
 import type { EventLog } from './events';
+import { accessibleName } from './fingerprint';
+import { concreteFromCached, createLadder, describeLandmark, expectationFor, type Expectation, type RungOutcome, type ScoredCandidate } from './ladder';
+import type { LocatorCache } from './locator-cache';
 import { OutcomeError } from './outcome';
 import type { PlanSource } from './planner';
-import { concreteTarget, describeTarget, resolveRung1, type ConcreteTarget } from './resolve';
+import type { Rung3Picker, Rung3Request } from './resolver';
+import { concreteTarget, describeTarget, type ConcreteTarget } from './resolve';
 import { settle, type SettleConfig } from './settle';
 import type { Timings } from './timing';
+import { valueOwnersOf } from './tree';
 
 export interface ExecuteInput {
   page: Page;
@@ -40,11 +47,22 @@ export interface ExecuteInput {
   inputs: Readonly<Record<string, string>>;
   budgets: Budgets;
   settle: SettleConfig;
+  ladder: EngineConfig['ladder'];
+  /** runs/locators/<intentId>.json: rung 1 reads it, heals write it. */
+  locators: LocatorCache;
+  /** Rung 3. Absent means the ladder stops at rung 2. */
+  picker?: Rung3Picker;
+  runId: string;
   events: EventLog;
   timings: Timings;
   /** Eval hook, awaited after every action (used to kill the server mid-run). */
   afterAction?: (stepKey: string) => Promise<void>;
+  /** Receives a reader of the run so far, so a watchdog verdict still reports the actions and heals that happened. */
+  onSnapshot?: (snapshot: ExecutionSnapshot) => void;
 }
+
+/** The run so far, ended with the given reason. */
+export type ExecutionSnapshot = (reason: Reason) => ExecutionResult;
 
 export interface ExecutionResult {
   outcome: RunOutcome;
@@ -55,6 +73,9 @@ export interface ExecutionResult {
   lastStepKey: string | null;
   rungHistogram: RungHistogram;
   environmentErrors: string[];
+  heals: HealEvent[];
+  /** Runs whose earlier heals this run reused on rung 1. */
+  reusedHealsFrom: string[];
   /** The plan as executed, expansions included. */
   plan: Plan | null;
   /** Milestones whose steps were written during this run. */
@@ -79,24 +100,40 @@ function classify(error: unknown): OutcomeError {
   return new OutcomeError('environment', 'unexpected_error', message);
 }
 
+/** How a step's target was found: the winning rung, what it expected, and why the cheaper rungs failed. */
+interface Resolution {
+  outcome: RungOutcome;
+  expectation: Expectation;
+  failures: string[];
+}
+
 /**
- * Runs a plan with rung 1 only. Hard gates around every action: budgets, allowlist, settle gate,
- * objective validation, progress check, loop detection. The terminal action runs at most once and
- * hands straight over to the verifier. Every step of the way is a line in events.jsonl.
+ * Runs a plan. Hard gates around every action: budgets, allowlist, settle gate, the resolution ladder
+ * (cached locator, attribute similarity, fast model per screen) with objective validation, progress check,
+ * loop detection. The terminal action runs at most once and hands straight over to the verifier.
+ * Every resolution, heal, action and budget tick is a line in events.jsonl.
  */
 export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
-  const { page, origin, budgets, events, timings, inputs, planner } = input;
+  const { page, origin, budgets, events, timings, inputs, planner, locators } = input;
   const startedAt = performance.now();
   const elapsedMs = () => Math.round(performance.now() - startedAt);
   const inputKeys = new Set(input.healer.inputKeys);
+  const valueOwners = valueOwnersOf(inputs);
+  const ladder = createLadder({ page, inputs, valueOwners, ladder: input.ladder });
   const rungHistogram = emptyRungHistogram();
   const environmentErrors: string[] = [];
+  const heals: HealEvent[] = [];
+  const reusedHealsFrom = new Set<string>();
   const expanded: string[] = [];
   const completed: string[] = [];
   const doneSteps: Step[] = [];
   /** Milestones whose expansion said "more": they continue on a later screen. */
   const needsMore = new Set<string>();
   const reexpansions = new Map<string, number>();
+  /** Rung-3 attempts per step and screen, against budgets.maxRung3AttemptsPerStepPerScreen. */
+  const rung3Attempts = new Map<string, number>();
+  /** Rung-3 answers for later steps of a batch, kept for when the run reaches them on the same screen. */
+  const preResolved = new Map<string, { screen: string; outcome: RungOutcome }>();
   let plan: Plan | null = input.plan ? structuredClone(input.plan) : null;
   let actions = 0;
   let lastStepKey: string | null = null;
@@ -123,10 +160,14 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     lastStepKey,
     rungHistogram,
     environmentErrors,
+    heals,
+    reusedHealsFrom: [...reusedHealsFrom],
     plan,
     expanded,
     completed,
   });
+  // A copy: the executor may still be unwinding when the watchdog reads it.
+  input.onSnapshot?.((reason) => structuredClone(finish('environment', reason)));
 
   /** Time left for one step: the step budget, capped by what remains of the run budget. */
   const stepBudget = (): number => {
@@ -140,6 +181,132 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     if (!result.settled) events.emit('settle_timeout', { label, waitedMs: result.waitedMs });
     return result.state;
   };
+
+  /** A screen is a path plus the dialogs open on it: one rung-3 attempt per step per screen. */
+  async function screenKey(): Promise<string> {
+    const dialogs: string[] = [];
+    for (const dialog of await page.getByRole('dialog').filter({ visible: true }).all()) dialogs.push(await accessibleName(dialog));
+    return `${new URL(page.url()).pathname}|${dialogs.sort().join(',')}`;
+  }
+
+  const purposeOf = (step: Step, milestone: Milestone): string =>
+    ('target' in step && step.target?.hint) || `${step.action} in milestone ${milestone.key}: ${milestone.description}`;
+
+  const failed = (reason: string): RungOutcome => ({
+    ok: false,
+    rung: 3,
+    reason,
+    locator: null,
+    target: null,
+    cachedLocator: null,
+    fingerprint: null,
+    validation: { unique: false, visible: false, enabled: false, roleMatch: false, inLandmark: false },
+    score: null,
+    ms: 0,
+  });
+
+  /**
+   * Rung 3: one fast-model call for this step and every later step of the milestone that rungs 1 and 2 cannot
+   * resolve on this screen either. Answers for the later steps are kept until the run reaches them.
+   */
+  async function rung3(milestone: Milestone, index: number, step: Step, expectation: Expectation, candidates: ScoredCandidate[]): Promise<RungOutcome> {
+    const screen = await screenKey();
+    const kept = preResolved.get(step.key);
+    if (kept && kept.screen === screen) {
+      preResolved.delete(step.key);
+      if (!kept.outcome.ok || !kept.outcome.target) return kept.outcome;
+      const again = await ladder.rung1({ ...expectation, cached: null, target: kept.outcome.target }, 0);
+      return again.ok ? kept.outcome : failed(`the rung-3 pick ${describeTarget(kept.outcome.target)} no longer validates`);
+    }
+    if (!input.picker) return failed('no model is available for rung 3');
+    const attempts = (key: string) => rung3Attempts.get(`${key}|${screen}`) ?? 0;
+    if (attempts(step.key) >= budgets.maxRung3AttemptsPerStepPerScreen) return failed('rung 3 was already tried for this step on this screen');
+    if (candidates.length === 0) return failed('there are no candidates of this role on this screen');
+
+    const batch: Rung3Request[] = [{ expectation, purpose: purposeOf(step, milestone), candidates }];
+    for (const later of milestone.steps.slice(index + 1)) {
+      const laterExpectation = expectationFor(later, locators.get(later.key), inputs);
+      if (!laterExpectation || preResolved.has(later.key) || attempts(later.key) >= budgets.maxRung3AttemptsPerStepPerScreen) continue;
+      if ((await ladder.rung1(laterExpectation, 0)).ok) continue;
+      const laterRung2 = await ladder.rung2(laterExpectation);
+      if (laterRung2.ok || laterRung2.candidates.length === 0) continue;
+      batch.push({ expectation: laterExpectation, purpose: purposeOf(later, milestone), candidates: laterRung2.candidates });
+    }
+    const started = performance.now();
+    const picks = await input.picker.pick(page, batch);
+    let own: RungOutcome = failed('rung 3 did not answer');
+    for (const request of batch) {
+      const key = request.expectation.stepKey;
+      rung3Attempts.set(`${key}|${screen}`, attempts(key) + 1);
+      const chosen = picks.get(key) ?? null;
+      const outcome = chosen
+        ? await ladder.adopt(chosen, request.expectation, 3, started, 'picked by the fast model')
+        : failed('the fast model found no candidate that does this step');
+      if (key === step.key) own = outcome;
+      else preResolved.set(key, { screen, outcome });
+    }
+    return own;
+  }
+
+  /** Resolution ladder: rung 1, then rung 2, then rung 3. Rung 5 (milestone re-plan) arrives in P4. */
+  async function resolveTarget(milestone: Milestone, index: number, step: Step, escalateFrom: ConcreteTarget | null = null): Promise<Resolution> {
+    const expectation = expectationFor(step, locators.get(step.key), inputs);
+    if (!expectation) throw new OutcomeError('unresolvable', 'no_target', `${step.key} has no target to resolve`);
+    const failures: string[] = [];
+    if (escalateFrom) {
+      // A rung-2 heal acted but changed nothing: go one rung up, without the element that failed.
+      failures.push(`rung 2: ${describeTarget(escalateFrom)} acted without effect`);
+      const { candidates } = await ladder.candidatesFor(expectation);
+      const others = candidates.filter((candidate) => candidate.name !== escalateFrom.name);
+      return { outcome: await rung3(milestone, index, step, expectation, others), expectation, failures };
+    }
+    const first = await ladder.rung1(expectation, Math.min(2000, stepBudget()));
+    if (first.ok) return { outcome: first, expectation, failures };
+    failures.push(`rung 1: ${first.reason}`);
+    const second = await ladder.rung2(expectation);
+    if (second.ok) return { outcome: second, expectation, failures };
+    failures.push(`rung 2: ${second.reason}`);
+    if (expectation.scope?.required && second.candidates.length === 0) return { outcome: failed('nothing to ask: the required scope is missing'), expectation, failures };
+    const third = await rung3(milestone, index, step, expectation, second.candidates);
+    if (!third.ok) failures.push(`rung 3: ${third.reason}`);
+    return { outcome: third, expectation, failures };
+  }
+
+  /** After the action worked: a heal becomes a HealEvent and a cache entry; a first success is cached too. */
+  function commit(milestone: Milestone, step: Step, resolution: Resolution): void {
+    const { outcome, expectation } = resolution;
+    if (!outcome.target || !outcome.cachedLocator || !outcome.fingerprint) return;
+    const entry = { locator: outcome.cachedLocator, fingerprint: outcome.fingerprint, updatedByRun: input.runId, updatedAt: new Date().toISOString() };
+    if (outcome.rung === 1) {
+      if (expectation.cached) {
+        if (expectation.cached.rung >= 2) reusedHealsFrom.add(expectation.cached.updatedByRun);
+        return;
+      }
+      locators.set(step.key, { ...entry, rung: 1 });
+      events.emit('locator_cached', { stepKey: step.key, target: describeTarget(outcome.target) });
+      return;
+    }
+    const before = expectation.cached ? (concreteFromCached(expectation.cached.locator, inputs) ?? expectation.target) : expectation.target;
+    const heal: HealEvent = {
+      runId: input.runId,
+      milestoneKey: milestone.key,
+      stepKey: step.key,
+      from: before,
+      to: outcome.target,
+      rung: outcome.rung,
+      reason: [...resolution.failures, outcome.reason].join('; '),
+      validation: outcome.validation,
+      ms: outcome.ms,
+    };
+    heals.push(heal);
+    locators.set(step.key, { ...entry, rung: outcome.rung });
+    const fromText = describeTarget(before);
+    const toText = describeTarget(outcome.target);
+    // Same locator, new place: the heal is the landmark move, so say that rather than "X became X".
+    const moved =
+      fromText === toText && expectation.cached ? `moved from ${describeLandmark(expectation.cached.fingerprint)} to ${describeLandmark(outcome.fingerprint)}` : null;
+    events.emit('healed', { ...heal, fromText, toText, moved });
+  }
 
   /** The terminal milestone's committing step, once it is known. */
   function committingStep(): Step | null {
@@ -161,95 +328,103 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       throw new OutcomeError('refused', allowed.code, allowed.message);
     }
     // Terminal rule: the committing click runs only as the terminal milestone's last step, never from elsewhere.
-    const commit = committingStep();
-    if (!milestone.terminal && commit && sameTarget(step, commit)) {
-      const message = `${step.key} would perform the committing action (${commit.key}) outside the terminal milestone`;
+    const commitStep = committingStep();
+    if (!milestone.terminal && commitStep && sameTarget(step, commitStep)) {
+      const message = `${step.key} would perform the committing action (${commitStep.key}) outside the terminal milestone`;
       events.emit('refused', { milestoneKey: milestone.key, stepKey: step.key, message });
       throw new OutcomeError('refused', 'commit_outside_terminal', message);
     }
 
-    let locator: Locator | null = null;
-    let target = '';
-    if ('target' in step && step.target) {
-      const concrete = concreteTarget(step.target, inputs);
-      target = describeTarget(concrete);
-      const result = await resolveRung1(page, concrete, Math.min(2000, stepBudget()));
-      if (!result.ok) {
-        events.emit('unresolved', {
-          milestoneKey: milestone.key,
-          stepKey: step.key,
-          rung: 1,
-          target,
-          reason: result.reason,
-          validation: result.resolved.validation,
-          ms: result.resolved.ms,
-        });
-        throw new OutcomeError(
-          'unresolvable',
-          'rung1_unresolved',
-          `rung 1 could not resolve ${target}: ${result.reason} (healing rungs 2-5 are not built yet)`,
-        );
+    let resolution: Resolution | null = null;
+    const resolve = async (escalateFrom: ConcreteTarget | null = null): Promise<Resolution> => {
+      const found = await resolveTarget(milestone, index, step, escalateFrom);
+      const target = describeTarget(found.expectation.target);
+      if (!found.outcome.ok || !found.outcome.target) {
+        events.emit('unresolved', { milestoneKey: milestone.key, stepKey: step.key, target, failures: found.failures });
+        throw new OutcomeError('unresolvable', 'unresolved', `${step.key}: no rung could resolve ${target} (${found.failures.join('; ')}); milestone re-planning (rung 5) arrives in P4`);
       }
-      rungHistogram['1']++;
+      rungHistogram[String(found.outcome.rung) as '1' | '2' | '3']++;
       events.emit('resolved', {
         milestoneKey: milestone.key,
         stepKey: step.key,
-        rung: 1,
+        rung: found.outcome.rung,
         action: step.action,
-        target,
-        validation: result.resolved.validation,
-        ariaLine: result.resolved.evidence.ariaLine,
-        ms: result.resolved.ms,
+        target: describeTarget(found.outcome.target),
+        planned: target,
+        validation: found.outcome.validation,
+        score: found.outcome.score,
+        ms: found.outcome.ms,
       });
-      locator = result.locator;
-    }
+      return found;
+    };
+    if ('target' in step && step.target) resolution = await resolve();
 
     const value = step.action === 'fill' || step.action === 'select' ? (inputs[step.inputRef] ?? null) : null;
-    const before = state ?? (await settleNow(`before ${step.key}`));
-    if (isTerminalAction) {
-      terminalAttempted = true;
-      events.emit('terminal_attempted', { milestoneKey: milestone.key, stepKey: step.key });
-    }
-    actions++;
-    const actionStarted = performance.now();
-    await perform(page, step, locator, value, origin, stepBudget());
-    doneSteps.push(step);
-    events.emit('action', {
-      milestoneKey: milestone.key,
-      stepKey: step.key,
-      action: step.action,
-      target,
-      inputRef: step.action === 'fill' || step.action === 'select' ? step.inputRef : null,
-      ms: Math.round(performance.now() - actionStarted),
-      budget: { actions, maxActions: budgets.maxActions, elapsedMs: elapsedMs(), runMs: budgets.runMs },
-    });
-    if (input.afterAction) await input.afterAction(step.key);
-    const after = await settleNow(step.key);
-    state = after;
+    for (let attempt = 1; ; attempt++) {
+      const locator: Locator | null = resolution?.outcome.locator ?? null;
+      const target = resolution?.outcome.target ? describeTarget(resolution.outcome.target) : '';
+      const before = state ?? (await settleNow(`before ${step.key}`));
+      if (isTerminalAction) {
+        terminalAttempted = true;
+        events.emit('terminal_attempted', { milestoneKey: milestone.key, stepKey: step.key });
+      }
+      actions++;
+      const actionStarted = performance.now();
+      await perform(page, step, locator, value, origin, stepBudget());
+      if (attempt === 1) doneSteps.push(step);
+      events.emit('action', {
+        milestoneKey: milestone.key,
+        stepKey: step.key,
+        action: step.action,
+        target,
+        inputRef: step.action === 'fill' || step.action === 'select' ? step.inputRef : null,
+        ms: Math.round(performance.now() - actionStarted),
+        budget: { actions, maxActions: budgets.maxActions, elapsedMs: elapsedMs(), runMs: budgets.runMs },
+      });
+      if (input.afterAction) await input.afterAction(step.key);
+      const after = await settleNow(step.key);
+      state = after;
 
-    if (isTerminalAction) {
-      // Terminal rule: whatever happened, the run goes straight to the verifier.
-      const completion = await completionHolds(page, milestone, inputs);
-      healerBelievedDone = { believed: completion.holds, atStep: actions, stepKey: step.key };
-      events.emit('healer_done', { believed: completion.holds, atStep: actions, stepKey: step.key, detail: completion.detail });
-      return true;
-    }
+      if (isTerminalAction) {
+        // Terminal rule: whatever happened, the run goes straight to the verifier. Never retried.
+        if (resolution) commit(milestone, step, resolution);
+        const completion = await completionHolds(page, milestone, inputs);
+        healerBelievedDone = { believed: completion.holds, atStep: actions, stepKey: step.key };
+        events.emit('healer_done', { believed: completion.holds, atStep: actions, stepKey: step.key, detail: completion.detail });
+        return true;
+      }
 
-    if (!sameOrigin(page.url(), origin)) {
-      throw new OutcomeError('refused', 'left_origin', `the page left ${origin} for ${page.url()}`);
-    }
+      if (!sameOrigin(page.url(), origin)) {
+        throw new OutcomeError('refused', 'left_origin', `the page left ${origin} for ${page.url()}`);
+      }
 
-    const nextStep = milestone.steps[index + 1];
-    const nextTarget: ConcreteTarget | null = nextStep && 'target' in nextStep && nextStep.target ? concreteTarget(nextStep.target, inputs) : null;
-    const progress = await checkProgress({ page, step, locator, value, before, after, nextTarget });
-    events.emit('progress', { stepKey: step.key, ok: progress.ok, detail: progress.detail });
-    if (!progress.ok) throw new OutcomeError('unresolvable', 'no_progress', `${step.key}: ${progress.detail}`);
+      const nextStep = milestone.steps[index + 1];
+      const nextTarget: ConcreteTarget | null = nextStep && 'target' in nextStep && nextStep.target ? concreteTarget(nextStep.target, inputs) : null;
+      const progress = await checkProgress({ page, step, locator, value, before, after, nextTarget });
+      events.emit('progress', { stepKey: step.key, ok: progress.ok, detail: progress.detail });
+      if (progress.ok) {
+        if (resolution) commit(milestone, step, resolution);
+        unchangedActions = after.fullHash === before.fullHash ? unchangedActions + 1 : 0;
+        if (unchangedActions >= 3) {
+          throw new OutcomeError('unresolvable', 'loop_detected', 'the page did not change across three consecutive actions');
+        }
+        return false;
+      }
 
-    unchangedActions = after.fullHash === before.fullHash ? unchangedActions + 1 : 0;
-    if (unchangedActions >= 3) {
-      throw new OutcomeError('unresolvable', 'loop_detected', 'the page did not change across three consecutive actions');
+      // A healed action without effect: undo the navigation if any, then escalate one rung (rung 2 only, once).
+      if (resolution && resolution.outcome.rung >= 2) {
+        events.emit('heal_rejected', { stepKey: step.key, rung: resolution.outcome.rung, target, detail: progress.detail });
+        if (after.url !== before.url) {
+          await page.goBack({ timeout: stepBudget() }).catch(() => undefined);
+          state = await settleNow(`back after ${step.key}`);
+        }
+        if (resolution.outcome.rung === 2 && attempt === 1 && resolution.outcome.target) {
+          resolution = await resolve(resolution.outcome.target);
+          continue;
+        }
+      }
+      throw new OutcomeError('unresolvable', 'no_progress', `${step.key}: ${progress.detail}`);
     }
-    return false;
   }
 
   /**

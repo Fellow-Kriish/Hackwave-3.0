@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "4660ada9e1bb2f0289e007d42769f54e61efaab95c13dcfad028a9101a2eaea7",
+  "stage": "resolver",
+  "prompt": "resolve",
+  "promptVersion": "resolve/2",
+  "promptHash": "f10e8ee6245d109226080a579ceb8ceee80181710fa304f6a74a62be239b89ac",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "65eed0203ffed4fe807e8c477365a33ab0c0ac0d81100055d47065347d0e1b96",
+  "text": "{\"steps\":[{\"step\":\"checkout.start\",\"candidate\":\"c1\"}]}",
+  "usage": {
+    "input": 735,
+    "output": 187
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T05:10:30.197Z"
+}
