@@ -94,6 +94,10 @@ export interface ExecutionResult {
   replanned: string[];
   /** Milestones whose steps all ran through, or whose completion already held when they came up. */
   completed: string[];
+  /** Milestones in the order they started (adaptive order). */
+  started: string[];
+  /** Milestones skipped because their completion already held. */
+  skipped: string[];
 }
 
 /** A milestone marked "more" is expanded again on each new screen, at most this many times. */
@@ -164,6 +168,8 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
   const done = new Set<string>();
   const replans: ReplanEvent[] = [];
   const replanned: string[] = [];
+  const started: string[] = [];
+  const skipped: string[] = [];
   const doneSteps: Step[] = [];
   /** Milestones whose expansion said "more": they continue on a later screen. */
   const needsMore = new Set<string>();
@@ -209,6 +215,8 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     expanded,
     replanned,
     completed,
+    started,
+    skipped,
   });
   // A copy: the executor may still be unwinding when the watchdog reads it.
   input.onSnapshot?.((reason) => structuredClone(finish('environment', reason)));
@@ -575,17 +583,18 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
       const ready = current.milestones.filter((m) => !done.has(m.key) && m.dependsOn.every((dependency) => done.has(dependency)));
       const first = ready[0];
       if (!first) return null;
-      let skipped = false;
+      let skippedAny = false;
       for (const milestone of ready) {
         const detail = await alreadySatisfied(milestone);
         if (detail === null) continue;
         events.emit('milestone_skipped', { milestoneKey: milestone.key, detail });
+        skipped.push(milestone.key);
         completed.push(milestone.key);
         done.add(milestone.key);
-        skipped = true;
+        skippedAny = true;
       }
       // A skip can make other milestones ready.
-      if (skipped) continue;
+      if (skippedAny) continue;
       if (ready.length === 1) return first;
       for (const candidate of ready) {
         if (!(await opensHere(candidate))) continue;
@@ -643,7 +652,14 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     // Rung-3 answers kept for the replaced steps no longer apply.
     for (const step of oldSteps) preResolved.delete(step.key);
     rungHistogram['5']++;
-    const event: ReplanEvent = { milestoneKey: milestone.key, reason: need.failures.join('; ') || need.message, oldSteps, newSteps: result.steps, attempt };
+    const event: ReplanEvent = {
+      milestoneKey: milestone.key,
+      reason: need.failures.join('; ') || need.message,
+      oldSteps,
+      newSteps: result.steps,
+      attempt,
+      rationale: result.reason,
+    };
     replans.push(event);
     if (!replanned.includes(milestone.key)) replanned.push(milestone.key);
     events.emit('replanned', { ...event, maxAttempts, more: result.more, why: result.reason, added: result.steps.map(describeStep) });
@@ -668,6 +684,7 @@ export async function execute(input: ExecuteInput): Promise<ExecutionResult> {
     for (;;) {
       const milestone = await nextMilestone(current);
       if (!milestone) break;
+      started.push(milestone.key);
       events.emit('milestone_started', { milestoneKey: milestone.key, description: milestone.description, terminal: milestone.terminal });
       if (!isExpanded(milestone)) await expandFrom(current, milestone, false);
 

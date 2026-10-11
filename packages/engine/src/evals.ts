@@ -253,12 +253,21 @@ async function runSelected(
     console.log(dim(`      ${relative(root, result.runDir)}`));
   };
 
+  const ran = new Set<string>();
   for (const fixture of selected) {
     if (fixture.pending) {
       pending++;
       console.log(dim(`  - ${fixture.name}: pending until ${fixture.pending}`));
       continue;
     }
+    // after:<fixture> means "as that fixture left the caches": without it in this eval, the state is whatever is on disk.
+    const after = fixture.cache?.startsWith('after:') ? fixture.cache.slice('after:'.length) : null;
+    if (after && !ran.has(after)) {
+      failed++;
+      console.log(`${red(`  ✗ ${fixture.name}`)}  not run: its cache state is after:${after}, so ${after} has to run earlier in the same eval; add it to the list`);
+      continue;
+    }
+    ran.add(fixture.name);
     const started = Date.now();
     let shop: PrivateShop | null = null;
     try {

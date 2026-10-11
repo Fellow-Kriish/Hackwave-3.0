@@ -1,13 +1,17 @@
 import { readFileSync } from 'node:fs';
-import { parseIntent, parsePlan, type Intent, type Plan } from '@hackwave/contracts';
+import { ContractError, parsePlan, type Intent, type Plan } from '@hackwave/contracts';
+import { formatLint, lintIntentText } from './intent-lint';
 
-function readJson(file: string, what: string): unknown {
-  let text: string;
+function readText(file: string, what: string): string {
   try {
-    text = readFileSync(file, 'utf8');
+    return readFileSync(file, 'utf8');
   } catch (error) {
     throw new Error(`cannot read ${what} ${file}: ${(error as NodeJS.ErrnoException).code ?? String(error)}`, { cause: error });
   }
+}
+
+function readJson(file: string, what: string): unknown {
+  const text = readText(file, what);
   try {
     return JSON.parse(text);
   } catch (error) {
@@ -15,8 +19,11 @@ function readJson(file: string, what: string): unknown {
   }
 }
 
+/** The intent, or a ContractError with the same line-by-line problems `pnpm engine lint` prints. */
 export function loadIntent(file: string): Intent {
-  return parseIntent(readJson(file, 'intent'), `intent ${file}`);
+  const result = lintIntentText(readText(file, 'intent'));
+  if (!result.intent) throw new ContractError(`intent ${formatLint(file, result)}`);
+  return result.intent;
 }
 
 export function loadPlan(file: string): Plan {

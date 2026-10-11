@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "key": "23872b0cbe8120cdffe1457331db3e3f670616d2b96737f074b5fc33a7002afe",
+  "stage": "explain",
+  "prompt": "explain",
+  "promptVersion": "explain/1",
+  "promptHash": "c7853d34408f9dd3f60e6fe437b58140f507fecba1789e92890aa0856a47ba44",
+  "provider": "groq",
+  "model": "openai/gpt-oss-120b",
+  "inputHash": "6c7bd25e7feb5a7b9d1adee0a5445d5e368d67d4aef3575c0c9b8dd075c71fe4",
+  "text": "{\"hypothesis\":\"The final page correctly displayed the new order ID, confirming the UI received the order, but the store record shows a total of 999 instead of the expected 1299, indicating a mismatch between what was persisted and what the test expected. This points likely to a bug in the backend order creation layer, such as the POST endpoint or the price‑calculation logic that writes the total to the orders store. The first thing to check is the code that computes and stores the order total during the place‑order submission.\"}",
+  "usage": {
+    "input": 591,
+    "output": 232
+  },
+  "attempts": 1,
+  "recordedAt": "2026-10-11T08:10:27.703Z"
+}

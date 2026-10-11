@@ -1,7 +1,7 @@
 # Hackwave-3.0
 
 Intent-based, self-healing E2E testing: tests that describe intent, heal their own path, and cannot lie about the outcome.
-The build plan is [docs/BUILD.md](docs/BUILD.md). Status: **P4 (milestone re-plan and adaptive ordering) complete.** The
+The build plan is [docs/BUILD.md](docs/BUILD.md). Status: **P5 (reporter and developer experience) complete.** The
 provider-switch eval currently runs groq and the custom driver pointed at Groq; a second vendor is still to be added.
 
 ## Quick start
@@ -11,7 +11,7 @@ Needs Node 20.19+ and pnpm 10 (`npm install -g pnpm@10`).
 ```sh
 pnpm bootstrap          # install dependencies and Playwright's Chromium
 pnpm shop               # build the shop once, start v1, v2 and v2-broken side by side
-pnpm engine doctor      # preflight: ports, reset endpoint, baseline, browser
+pnpm engine doctor      # preflight: Node, ports, reset endpoint, baseline, browser, replay cache, prompts, intents and caches
 ```
 
 | Shop | URL | Behaviour |
@@ -41,8 +41,41 @@ pnpm engine eval                                                                
 ```
 
 Add `--headed --slow-mo 300` to watch the browser. Each run streams events to the console and writes
-`runs/<timestamp>-<intent>-<target>/` with `plan-used.json`, `events.jsonl`, `evidence/`, `verdict.json`, `report.md` and `config-used.json`.
-Exit codes: 0 GREEN or AMBER, 1 RED, 2 GREY, 3 setup error.
+`runs/<timestamp>-<intent>-<target>/` with `plan-used.json`, `events.jsonl`, `evidence/`, `verdict.json`, `report.md`, `report.html`
+and `config-used.json`. Exit codes: 0 GREEN or AMBER, 1 RED, 2 GREY, 3 setup error.
+
+## Reports
+
+`report.md` (and the same page as `report.html`, a fallback for sharing) opens with the verdict and one sentence, then:
+
+| Section | What it shows |
+| --- | --- |
+| Two notions of done | what the healer believed from the page against what the verifier found in the store; first, for a real bug |
+| Config in force | budgets, ladder thresholds, tree and settle limits, model tiers |
+| Oracle checks | state delta, UI-to-state binding, no error alerts, with the values compared |
+| Hypothesis | for a real bug only: one paragraph from the fast model on where the bug likely is, written after the verdict from the evidence (input values redacted); it cannot change the verdict, and in replay it is served from the cache or skipped |
+| Heals | the heal diff: before and after locator per step, the rung, the validation flags, why the cheaper rungs failed |
+| Re-plans, Plan diff | each re-plan's old and new steps with the re-planner's reason; the plan as run against the plan as loaded (order, skips, steps) |
+| Suggested fix | for AMBER: the locator-cache entries the run rewrote, as a diff, and a pull-request description to paste |
+| Run, Step timings | outcome, actions, rung histogram, model calls and tokens, browser time against model time |
+
+The console's final block tells the same story in short, including the PR text for AMBER and the hypothesis for RED.
+
+## Intents: lint and init
+
+```sh
+pnpm engine lint intents/checkout.json            # JSON, schema, inputs field by field, leftover TODOs; one line per problem, exit 1 on any
+pnpm engine init "As a shopper, buy a gift card and reach the confirmation."   # writes intents/<id>.json with TODOs to fill in
+```
+
+A broken intent fails the same way in `run` and `eval`, for example:
+
+```text
+intents/bad.json is invalid (3 problems):
+  line 2   id                  "Bad Intent" is not an id: use lower-case words joined by hyphens, e.g. "bad-intent"
+  line 4   inputs.card.number  must be text in quotes, got a number (groups are one level deep)
+  line 5   oracle.ui           missing: add "ui": { "newRecordIdVisible": true, "noAlerts": true }
+```
 
 Without `--plan`, the engine uses `runs/plans/<intent>.json`; when there is none, the planner writes one from the goal and
 the landing screen, then expands each milestone into steps on the live screen (about four model calls for the checkout).
@@ -113,7 +146,7 @@ Copy `.env.example` to `.env` and set `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL_
 | Mode | What happens |
 | --- | --- |
 | `replay` (default) | calls are served from `runs/llm-cache`, pinned to the provider and models in its `manifest.json`; no API key or `.env` needed; a miss fails loudly |
-| `record` | calls go to the model and are written to `runs/llm-cache` |
+| `record` | calls missing from `runs/llm-cache` go to the model and are written there; calls already recorded are reused (delete a cache file to record that call afresh) |
 | `live` | calls go to the model and nothing is cached |
 
 ```sh
@@ -133,7 +166,8 @@ profiles on one host are run a minute apart so its per-minute token limit can re
 pnpm check                            # lint, typecheck, unit tests
 pnpm engine eval                      # eval fixtures (shops must be running); a red fixture blocks the phase
 pnpm engine eval heal-warm-v1 heal-v2 # named fixtures only, in file order; plan and locator caches are put back afterwards (--keep-caches to keep them)
-                                      # a fixture's "cache": empty clears them, committed starts from the committed files, after:<fixture> chains
+                                      # a fixture's "cache": empty clears them, committed starts from the committed files,
+                                      # after:<fixture> chains (that fixture must run earlier in the same eval)
 pnpm engine eval v2-drift --headed --slow-mo 250   # watch any fixture's browser
 pnpm --filter @hackwave/shop smoke    # shopper-style checkout on all three shops (shops must be running)
 pnpm --filter @hackwave/shop a11y     # axe scan of every page state (shops must be running)
@@ -147,9 +181,9 @@ pnpm engine doctor --reset            # also clears every store; the next order 
 | apps/shop | React + Vite storefront and Express API; one codebase, variants selected by `SHOP_VERSION` |
 | packages/contracts | Zod schemas for intents, plans, events, run records and verdicts; `redactForHealer` |
 | packages/verifier | the oracle: state delta, UI-to-state binding, no-alerts, evidence bundle, the verdict decision table. No LLM (lint-enforced) |
-| packages/engine | CLI (`doctor`, `run`, `eval`), planner, executor (adaptive milestone order, resolution ladder rungs 1–3, rung-5 re-planner, locator cache), settle gate, console stream, report, `events.jsonl`, timing hooks |
+| packages/engine | CLI (`doctor`, `run`, `eval`, `lint`, `init`), planner, executor (adaptive milestone order, resolution ladder rungs 1–3, rung-5 re-planner, locator cache), settle gate, console stream, reporter (report.md and .html, RED explainer), `events.jsonl`, timing hooks |
 | packages/engine/src/llm | the only door to a model: provider drivers, record/replay cache, schema validation with one retry, telemetry |
-| prompts/ | the planner, resolver and re-planner prompts, each with a version line; their hashes are part of every cache key |
+| prompts/ | the planner, resolver, re-planner and explainer prompts, each with a version line; their hashes are part of every cache key |
 | runs/plans, runs/locators, runs/llm-cache | committed caches: the planned plan, the healed locators and the recorded model calls |
 | intents/ | test intents: the goal, inputs and the frozen oracle |
 | evals/ | fixtures with expected verdicts, and the hand-written plans (v1, v2, and v1's labels reflowed for v2) |
