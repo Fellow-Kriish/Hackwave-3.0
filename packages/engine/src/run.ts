@@ -18,15 +18,18 @@ import { sameOrigin } from './allowlist';
 import { loadConfig } from './config';
 import { printEvent } from './console';
 import { EventLog } from './events';
-import { execute, type ExecutionResult } from './executor';
+import { execute, type ExecutionResult, type ExecutionSnapshot } from './executor';
 import { describeTier, LlmAdapter, loadPrompt, readManifest, resolveLlmSettings } from './llm';
 import { loadIntent, loadPlan } from './load';
+import { LocatorCache } from './locator-cache';
 import { findRepoRoot } from './paths';
 import { cacheablePlan, loadCachedPlan, planCacheFile, savePlanCache } from './plan-cache';
 import { createPlanner, planPromptHash } from './planner';
 import { printFinalBlock, renderReport } from './report';
+import { createRung3Picker } from './resolver';
 import { createRunDir } from './run-dir';
 import { Timings } from './timing';
+import { valueOwnersOf } from './tree';
 
 /** Something is wrong before the run can start (bad files, server down, no model). A setup error, never GREY. */
 export class SetupError extends Error {
@@ -105,6 +108,7 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
   const inputs = flattenInputs(intent.inputs);
 
   const prompts = asSetupError(() => ({ plan: loadPrompt(root, 'planner'), expand: loadPrompt(root, 'expand') }));
+  const resolvePrompt = asSetupError(() => loadPrompt(root, 'resolve'));
   const promptHash = planPromptHash(prompts);
   let plan: Plan | null;
   let planSource: PlanSourceKind;
@@ -175,6 +179,18 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
     rejectDir: join(runDir, 'llm-rejected'),
   });
   const planner = planSource === 'hand-written' ? undefined : createPlanner({ llm, prompts, healer, inputValues: inputs, goalHash, tree: config.tree });
+  const locators = LocatorCache.load(root, intent.id, planSource === 'hand-written');
+  const locatorsLabel = relative(root, locators.file).replace(/\\/g, '/');
+  if (locators.problem) events.emit('locator_cache_ignored', { file: locatorsLabel, reason: locators.problem });
+  const picker = createRung3Picker({
+    llm,
+    prompt: resolvePrompt,
+    healer,
+    tree: config.tree,
+    valueOwners: valueOwnersOf(inputs),
+    candidatesPerStep: config.ladder.candidatesPerStep,
+    fullTreeBelowScore: config.ladder.fullTreeBelowScore,
+  });
 
   const verifier = createVerifier(intent, { origin, evidenceDir: join(runDir, 'evidence'), defaultPollMs: config.verifier.pollMs });
   let baseline;
@@ -201,25 +217,30 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
       void dialog.dismiss().catch(() => undefined);
     });
 
+    // A hang still reports what the run did before it: actions, rungs and heals (heals are in the locator cache).
+    let snapshot: ExecutionSnapshot | null = null;
     let watchdog: NodeJS.Timeout | undefined;
     const hung = new Promise<ExecutionResult>((settleRace) => {
-      watchdog = setTimeout(
-        () =>
-          settleRace({
+      const reason = { code: 'run_timeout', message: `the run did not finish within ${budgets.runMs + WATCHDOG_GRACE_MS} ms` };
+      watchdog = setTimeout(() => {
+        settleRace(
+          snapshot?.(reason) ?? {
             outcome: 'environment',
-            reason: { code: 'run_timeout', message: `the run did not finish within ${budgets.runMs + WATCHDOG_GRACE_MS} ms` },
+            reason,
             terminalAttempted: false,
             healerBelievedDone: { believed: false, atStep: null, stepKey: null },
             actions: 0,
             lastStepKey: null,
             rungHistogram: emptyRungHistogram(),
             environmentErrors: [],
+            heals: [],
+            reusedHealsFrom: [],
             plan,
             expanded: [],
             completed: [],
-          }),
-        budgets.runMs + WATCHDOG_GRACE_MS,
-      );
+          },
+        );
+      }, budgets.runMs + WATCHDOG_GRACE_MS);
     });
     const execution = await Promise.race([
       execute({
@@ -232,19 +253,29 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
         inputs,
         budgets,
         settle: config.settle,
+        ladder: config.ladder,
+        locators,
+        picker,
+        runId,
         events,
         timings,
         afterAction: options.afterAction,
+        onSnapshot: (read) => {
+          snapshot = read;
+        },
       }),
       hung,
     ]).finally(() => clearTimeout(watchdog));
 
-    const { plan: executedPlan, expanded, completed, ...outcome } = execution;
+    const { plan: executedPlan, expanded, completed, reusedHealsFrom, ...outcome } = execution;
     writeJson('plan-used.json', executedPlan);
     if (planner && executedPlan && (planSource === 'planner' || expanded.length > 0)) {
       const file = savePlanCache(root, cacheablePlan(executedPlan, expanded, completed));
       events.emit('plan_cached', { file: relative(root, file).replace(/\\/g, '/'), expanded, completed });
     }
+    // The fix the system emits: heals are written to the locator cache for review; the next run hits rung 1.
+    const locatorsUpdated = locators.updatedKeys();
+    if (locators.save()) events.emit('locators_saved', { file: locatorsLabel, updated: locatorsUpdated });
 
     const usage = llm.usage();
     const record: RunRecord = {
@@ -254,7 +285,6 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
       startedAt,
       endedAt: new Date().toISOString(),
       ...outcome,
-      heals: [],
       replans: [],
       llmCalls: usage.llmCalls,
       tokens: usage.tokens,
@@ -266,7 +296,17 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
     const verdict = decideVerdict(oracle, record);
     events.emit('verdict', { color: verdict.color, kind: verdict.kind, reasons: verdict.reasons });
 
-    const reportContext = { config: { ...config, budgets }, record, planFile: planLabel, planSource, runDir, llmMode: settings.mode };
+    const reportContext = {
+      config: { ...config, budgets },
+      record,
+      planFile: planLabel,
+      planSource,
+      runDir,
+      llmMode: settings.mode,
+      locatorsFile: locatorsLabel,
+      locatorsUpdated,
+      reusedHealsFrom,
+    };
     writeJson('run-record.json', record);
     writeJson('verdict.json', verdict);
     writeFileSync(join(runDir, 'report.md'), renderReport(verdict, reportContext));

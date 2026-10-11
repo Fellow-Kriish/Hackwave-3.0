@@ -13,7 +13,9 @@ import { completionHolds } from './completion';
 import { loadConfig } from './config';
 import { EventLog } from './events';
 import { execute } from './executor';
-import { concreteTarget, describeTarget, resolveRung1 } from './resolve';
+import { createLadder, expectationFor } from './ladder';
+import { LocatorCache } from './locator-cache';
+import { concreteTarget, describeTarget } from './resolve';
 import { settle } from './settle';
 import { Timings } from './timing';
 
@@ -90,6 +92,9 @@ describe('terminal rule', () => {
         inputs: {},
         budgets: loadConfig().budgets,
         settle: { sampleGapMs: 50, maxWaitMs: 500 },
+        ladder: loadConfig().ladder,
+        locators: LocatorCache.load(dir, 'i'),
+        runId: 'terminal-test',
         events: new EventLog(join(dir, 'events.jsonl')),
         timings: new Timings(),
       });
@@ -126,28 +131,34 @@ describe('on a real page', () => {
       </main>`);
   });
 
-  const target = (name: string, within?: { role: string; name: string }) => ({ role: 'button', name, ...(within ? { within } : {}) });
+  /** Rung 1 with no cache entry: the step's own target, validated. */
+  const rung1 = (name: string, within?: { role: string; name: string }) => {
+    const ladder = createLadder({ page, inputs: {}, valueOwners: new Map(), ladder: loadConfig().ladder });
+    const step: Step = { key: 'probe.click', action: 'click', target: { role: 'button', name, synonyms: [], ...(within ? { within } : {}) } };
+    const expectation = expectationFor(step, undefined, {});
+    if (!expectation) throw new Error('unreachable');
+    return ladder.rung1(expectation, 200);
+  };
 
   it('resolves a scoped target uniquely and refuses an ambiguous one', async () => {
-    const scoped = await resolveRung1(page, target('Add to cart', { role: 'article', name: 'Trail Runner' }), 200);
+    const scoped = await rung1('Add to cart', { role: 'article', name: 'Trail Runner' });
     expect(scoped.ok).toBe(true);
-    expect(scoped.resolved.validation).toEqual({ unique: true, visible: true, enabled: true, roleMatch: true, inLandmark: true });
-    expect(scoped.resolved.evidence.ariaLine).toBe('- button "Add to cart"');
+    expect(scoped.validation).toEqual({ unique: true, visible: true, enabled: true, roleMatch: true, inLandmark: true });
+    expect(scoped.fingerprint).toMatchObject({ role: 'button', name: 'Add to cart', landmark: { role: 'main' }, siblingText: ['Trail Runner'] });
 
-    const ambiguous = await resolveRung1(page, target('Add to cart'), 200);
-    expect(ambiguous).toMatchObject({ ok: false, reason: 'matches 2 elements' });
+    expect(await rung1('Add to cart')).toMatchObject({ ok: false, reason: 'plan target button "Add to cart" matches 2 elements' });
   });
 
   it('uses exact names: "Cart" is not "Cart (1)" and never "Add to cart"', async () => {
-    expect(await resolveRung1(page, target('Cart'), 200)).toMatchObject({ ok: false, reason: 'not found' });
-    expect((await resolveRung1(page, target('Cart (1)'), 200)).ok).toBe(true);
+    expect(await rung1('Cart')).toMatchObject({ ok: false, reason: 'plan target button "Cart" not found' });
+    expect((await rung1('Cart (1)')).ok).toBe(true);
   });
 
   it('fails validation on a disabled target and on a missing scope', async () => {
-    expect(await resolveRung1(page, target('Pay ₹1,299'), 200)).toMatchObject({ ok: false, reason: 'disabled' });
-    expect(await resolveRung1(page, target('Add to cart', { role: 'article', name: 'Moon Boot' }), 200)).toMatchObject({
+    expect(await rung1('Pay ₹1,299')).toMatchObject({ ok: false, reason: 'plan target button "Pay ₹1,299" is disabled' });
+    expect(await rung1('Add to cart', { role: 'article', name: 'Moon Boot' })).toMatchObject({
       ok: false,
-      reason: 'scope article "Moon Boot" not found',
+      reason: 'plan target button "Add to cart": scope article "Moon Boot" not found',
     });
   });
 

@@ -12,7 +12,8 @@
   },
   "prompts": {
     "planner": "124316365b9f1c519fbda2d105dc3e0d1da1e49171125b4a46e64f04a95bb817",
-    "expand": "77e37049dca1e32823c50d3ffadace758f83a5f46698a8112f48095f29d2c1cc"
+    "expand": "77e37049dca1e32823c50d3ffadace758f83a5f46698a8112f48095f29d2c1cc",
+    "resolve": "f10e8ee6245d109226080a579ceb8ceee80181710fa304f6a74a62be239b89ac"
   },
-  "updatedAt": "2026-10-11T03:48:31.469Z"
+  "updatedAt": "2026-10-11T05:10:35.987Z"
 }

@@ -1,5 +1,4 @@
-import { performance } from 'node:perf_hooks';
-import type { Resolved, Scope, Target, Validation } from '@hackwave/contracts';
+import type { Scope, Target } from '@hackwave/contracts';
 import type { Locator, Page } from 'playwright';
 
 type AriaRole = Parameters<Page['getByRole']>[0];
@@ -46,51 +45,4 @@ export function buildLocator(page: Page, target: ConcreteTarget): { scope: Locat
   const scope = target.within ? page.getByRole(target.within.role as AriaRole, nameOption(target.within.name)) : null;
   const locator = (scope ?? page).getByRole(target.role as AriaRole, nameOption(target.name));
   return { scope, locator };
-}
-
-export type ResolveResult =
-  | { ok: true; resolved: Resolved; locator: Locator }
-  | { ok: false; resolved: Resolved; reason: string };
-
-/**
- * Rung 1: build the locator from the target's role and name and validate it objectively:
- * exactly one match, role as expected, visible, enabled, inside its scope. No guessing past that.
- */
-export async function resolveRung1(page: Page, target: ConcreteTarget, appearWithinMs: number): Promise<ResolveResult> {
-  const started = performance.now();
-  const { scope, locator } = buildLocator(page, target);
-  // A target may render a moment after the page settles; wait briefly for it, never longer than the budget.
-  await locator
-    .first()
-    .waitFor({ state: 'visible', timeout: Math.max(0, appearWithinMs) })
-    .catch(() => undefined);
-
-  const scopeCount = scope ? await scope.count() : 1;
-  const count = scopeCount === 1 ? await locator.count() : 0;
-  const unique = count === 1;
-  const validation: Validation = {
-    unique,
-    visible: unique && (await locator.isVisible()),
-    enabled: unique && (await locator.isEnabled()),
-    // getByRole only matches the expected role, so a unique match is a role match.
-    roleMatch: unique,
-    inLandmark: scopeCount === 1 && unique,
-  };
-  const ariaLine = unique ? ((await locator.ariaSnapshot({ timeout: 1000 })).split('\n')[0] ?? null) : null;
-  const resolved: Resolved = {
-    locator: { role: target.role, name: target.name, ...(target.within ? { within: target.within } : {}) },
-    rung: 1,
-    validation,
-    evidence: { ariaLine, score: unique ? 1 : null },
-    ms: Math.round(performance.now() - started),
-  };
-
-  let reason: string | null = null;
-  if (scopeCount !== 1) reason = scopeCount === 0 ? `scope ${target.within?.role} "${target.within?.name}" not found` : `scope matches ${scopeCount} elements`;
-  else if (count === 0) reason = 'not found';
-  else if (!unique) reason = `matches ${count} elements`;
-  else if (!validation.visible) reason = 'not visible';
-  else if (!validation.enabled) reason = 'disabled';
-
-  return reason === null ? { ok: true, resolved, locator } : { ok: false, resolved, reason };
 }

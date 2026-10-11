@@ -14,8 +14,9 @@ available now:
       [--plan <file>]                    a hand-written plan; without it the cached plan or the planner is used
       [--llm-mode live|record|replay]    overrides LLM_MODE (replay needs no API key)
       [--headed] [--slow-mo <ms>]
-  eval [fixture] [--verbose]             runs one or all eval fixtures and compares verdicts
-      [--llm-mode live|record|replay]
+  eval [fixture...] [--verbose]          runs the named (or all) eval fixtures, in file order, and compares verdicts
+      [--llm-mode live|record|replay]    plan and locator caches are restored afterwards
+      [--keep-caches]                    ... unless this is given
 
 planned (docs/BUILD.md):
   lint <intent>                          P5
@@ -86,9 +87,9 @@ async function evaluate(args: string[]): Promise<number> {
     args,
     strict: true,
     allowPositionals: true,
-    options: { verbose: { type: 'boolean', default: false }, 'llm-mode': { type: 'string' } },
+    options: { verbose: { type: 'boolean', default: false }, 'llm-mode': { type: 'string' }, 'keep-caches': { type: 'boolean', default: false } },
   });
-  return runEvals({ only: positionals[0], verbose: values.verbose, llmMode: llmMode(values['llm-mode']) });
+  return runEvals({ only: positionals, verbose: values.verbose, llmMode: llmMode(values['llm-mode']), keepCaches: values['keep-caches'] });
 }
 
 async function main(argv: string[]): Promise<number> {

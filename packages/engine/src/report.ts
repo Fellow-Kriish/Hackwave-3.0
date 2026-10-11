@@ -9,6 +9,43 @@ export interface ReportContext {
   planSource: string;
   runDir: string;
   llmMode: string;
+  locatorsFile: string;
+  /** Step keys whose cache entries this run wrote. */
+  locatorsUpdated: string[];
+  /** Runs whose earlier heals this run reused on rung 1. */
+  reusedHealsFrom: string[];
+}
+
+function locatorText(locator: { role: string; name: string; within?: { role: string; name: string } | undefined } | null): string {
+  if (!locator) return '(none)';
+  return `${locator.role} "${locator.name}"${locator.within ? ` in ${locator.within.role} "${locator.within.name}"` : ''}`;
+}
+
+/** The heal diff: before and after locator per step, with the rung that found it and why. */
+function healSection(verdict: Verdict, context: ReportContext): string[] {
+  if (verdict.heals.length === 0) {
+    return context.reusedHealsFrom.length > 0
+      ? ['## Heals', '', `None this run. Locators healed earlier by run ${context.reusedHealsFrom.map((run) => `\`${run}\``).join(', ')} resolved on rung 1.`, '']
+      : [];
+  }
+  return [
+    '## Heals',
+    '',
+    `The locator cache \`${context.locatorsFile}\` was updated for ${verdict.heals.length} step(s); review the diff and commit it.`,
+    '',
+    '| Step | Before | After | Rung | Validated |',
+    '| --- | --- | --- | --- | --- |',
+    ...verdict.heals.map(
+      (heal) =>
+        `| ${heal.stepKey} | ${escapeCell(locatorText(heal.from))} | ${locatorText(heal.from) === locatorText(heal.to) ? 'same locator, element moved (reason below)' : escapeCell(locatorText(heal.to))} | ${heal.rung} | ${Object.entries(heal.validation)
+          .filter(([, ok]) => ok)
+          .map(([flag]) => flag)
+          .join(', ')} |`,
+    ),
+    '',
+    ...verdict.heals.map((heal) => `- \`${heal.stepKey}\`: ${heal.reason}`),
+    '',
+  ];
 }
 
 function llmLine(verdict: Verdict): string {
@@ -92,6 +129,7 @@ export function renderReport(verdict: Verdict, context: ReportContext): string {
       (name) => `| ${CHECK_LABEL[name]} | ${verdict.oracle[name].status} | ${escapeCell(verdict.oracle[name].summary)} |`,
     ),
     '',
+    ...healSection(verdict, context),
     '## Run',
     '',
     `- Outcome: ${record.outcome}${record.reason ? ` (${record.reason.code}: ${record.reason.message})` : ''}; terminal action ${record.terminalAttempted ? 'attempted once' : 'never attempted'}`,
@@ -123,6 +161,13 @@ export function printFinalBlock(verdict: Verdict, context: ReportContext): void 
   console.log(`  ${healerLine(verdict)} · verifier: ${verdict.color}`);
   if (verdict.oracle.finalHeading) console.log(dim(`  final page: "${verdict.oracle.finalHeading}"`));
   console.log(dim(`  ${histogram(verdict)} · heals ${verdict.heals.length} · re-plans ${verdict.replans.length}`));
+  for (const heal of verdict.heals) {
+    const after = locatorText(heal.from) === locatorText(heal.to) ? 'same locator, element moved' : locatorText(heal.to);
+    console.log(yellow(`  heal: ${heal.stepKey} ${locatorText(heal.from)} → ${after} (rung ${heal.rung})`));
+  }
+  if (verdict.heals.length === 0 && context.reusedHealsFrom.length > 0) {
+    console.log(dim(`  locators healed earlier by run ${context.reusedHealsFrom.join(', ')} resolved on rung 1`));
+  }
   console.log(dim(`  plan: ${context.planSource} · LLM calls ${llmLine(verdict)}`));
   console.log(dim(`  browser ${seconds(verdict.timings.browserMs)} · LLM ${seconds(verdict.timings.llmMs)} · total ${seconds(verdict.timings.totalMs)}`));
   console.log(dim(`  report: ${context.runDir}`));

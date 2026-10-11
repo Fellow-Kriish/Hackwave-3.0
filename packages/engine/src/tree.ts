@@ -1,3 +1,4 @@
+import type { Page } from 'playwright';
 import { OutcomeError } from './outcome';
 
 const INTERACTIVE = new Set([
@@ -131,4 +132,36 @@ export function pruneAriaSnapshot(snapshot: string, limits: { maxNodes: number; 
     );
   }
   return { text: lines.join('\n'), nodes: lines.length };
+}
+
+/** Input value (lower-cased) to its key: used to mark screen names that are input values, never to send values. */
+export function valueOwnersOf(inputs: Readonly<Record<string, string>>): Map<string, string> {
+  return new Map(Object.entries(inputs).map(([key, value]) => [value.trim().toLowerCase(), key]));
+}
+
+/** "(= input product)" when a name on screen is the value of an input, so a model can use the key. */
+export function inputMark(name: string, valueOwners: ReadonlyMap<string, string>): string {
+  const owner = valueOwners.get(name.trim().toLowerCase());
+  return owner ? ` (= input ${owner})` : '';
+}
+
+/**
+ * The current screen for a model: the pruned body tree, with names that equal an input value marked.
+ * The name is already on the screen, so nothing new is revealed; the mark only says which key it is.
+ */
+export async function screenTree(
+  page: Page,
+  limits: { maxNodes: number; maxTextChars: number },
+  valueOwners: ReadonlyMap<string, string>,
+): Promise<{ path: string; tree: PrunedTree }> {
+  const snapshot = await page.locator('body').ariaSnapshot({ timeout: 3000 });
+  const pruned = pruneAriaSnapshot(snapshot, limits);
+  const text = pruned.text
+    .split('\n')
+    .map((line) => {
+      const name = /^\s*- [a-z]+ "((?:[^"\\]|\\.)*)"/.exec(line)?.[1];
+      return name === undefined ? line : `${line}${inputMark(name, valueOwners)}`;
+    })
+    .join('\n');
+  return { path: new URL(page.url()).pathname, tree: { ...pruned, text } };
 }

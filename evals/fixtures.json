@@ -5,6 +5,7 @@
     "intent": "intents/checkout.json",
     "target": "v1",
     "plan": "evals/plans/checkout.v1.json",
+    "cache": "empty",
     "expect": { "color": "GREEN", "kind": "passed", "healerBelievedDone": true, "heals": 0, "replans": 0, "maxLlmCalls": 0 }
   },
   {
@@ -13,6 +14,7 @@
     "intent": "intents/checkout.json",
     "target": "v2",
     "plan": "evals/plans/checkout.v2.json",
+    "cache": "empty",
     "expect": { "color": "GREEN", "kind": "passed", "healerBelievedDone": true, "heals": 0, "replans": 0, "maxLlmCalls": 0 }
   },
   {
@@ -21,6 +23,7 @@
     "intent": "intents/checkout.json",
     "target": "v2-broken",
     "plan": "evals/plans/checkout.v2.json",
+    "cache": "empty",
     "expect": {
       "color": "RED",
       "kind": "real_bug",
@@ -37,6 +40,7 @@
     "target": "v2-wrong-total",
     "privateShop": true,
     "plan": "evals/plans/checkout.v2.json",
+    "cache": "empty",
     "expect": {
       "color": "RED",
       "kind": "real_bug",
@@ -46,20 +50,22 @@
     }
   },
   {
-    "name": "drift-without-healing",
-    "description": "v2 with the v1 plan and no healing rungs yet: rung 1 cannot find the cart button and refuses to guess. Becomes AMBER once rungs 2-5 exist.",
+    "name": "drift-needs-replan",
+    "description": "v2 with the v1 plan: rung 3 heals the cart and checkout buttons, then the payment fields are not on v2's shipping screen; that needs a milestone re-plan (rung 5, P4), so it refuses to guess.",
     "intent": "intents/checkout.json",
     "target": "v2",
     "plan": "evals/plans/checkout.v1.json",
-    "expect": { "color": "RED", "kind": "unresolvable", "reasonCodes": ["rung1_unresolved"], "heals": 0 }
+    "cache": "empty",
+    "expect": { "color": "RED", "kind": "unresolvable", "reasonCodes": ["unresolved"], "messageIncludes": ["Card number"], "minHealsAtRung": { "3": 1 } }
   },
   {
     "name": "unresolvable-hand",
-    "description": "v2, an intent for a product that does not exist: ends within budget, no hang.",
+    "description": "v2, an intent for a product that does not exist: the product card is a required scope, so nothing is guessed and no model is asked.",
     "intent": "intents/checkout-missing-product.json",
     "target": "v2",
     "plan": "evals/plans/checkout.v2.json",
-    "expect": { "color": "RED", "kind": "unresolvable", "reasonCodes": ["rung1_unresolved"] }
+    "cache": "empty",
+    "expect": { "color": "RED", "kind": "unresolvable", "reasonCodes": ["unresolved"], "messageIncludes": ["Moon Boot"], "heals": 0, "maxLlmCalls": 0 }
   },
   {
     "name": "env-down",
@@ -69,6 +75,7 @@
     "privateShop": true,
     "killAfterStep": "checkout.start",
     "plan": "evals/plans/checkout.v1.json",
+    "cache": "empty",
     "expect": {
       "color": "GREY",
       "kind": "environment",
@@ -91,6 +98,42 @@
     "target": "v1",
     "cache": "after:v1-baseline",
     "expect": { "color": "GREEN", "kind": "passed", "planSource": "cache", "heals": 0, "maxLlmCalls": 0 }
+  },
+  {
+    "name": "heal-warm-v1",
+    "description": "P3 chain, step 1: v1 with the hand-written v1 plan warms the locator cache (rung 1, first successes cached).",
+    "intent": "intents/checkout.json",
+    "target": "v1",
+    "plan": "evals/plans/checkout.v1.json",
+    "cache": "empty",
+    "expect": { "color": "GREEN", "kind": "passed", "heals": 0, "maxLlmCalls": 0 }
+  },
+  {
+    "name": "heal-v2",
+    "description": "P3 chain, step 2: v2 from the v1-warm locator cache, with the v1 labels in a plan already reflowed for v2 (what rung 5 will do in P4). Add to cart heals on rung 2 (it moved landmark); the bag, checkout and pay buttons heal on rung 3.",
+    "intent": "intents/checkout.json",
+    "target": "v2",
+    "plan": "evals/plans/checkout.reflowed.json",
+    "cache": "after:heal-warm-v1",
+    "expect": { "color": "AMBER", "kind": "ui_drift", "minHealsAtRung": { "2": 1, "3": 1 }, "maxLlmCalls": 3, "healerBelievedDone": true }
+  },
+  {
+    "name": "heal-v2-cached",
+    "description": "P3 chain, step 3: v2 again from the healed cache: GREEN, every step on rung 1, 0 LLM calls.",
+    "intent": "intents/checkout.json",
+    "target": "v2",
+    "plan": "evals/plans/checkout.reflowed.json",
+    "cache": "after:heal-v2",
+    "expect": { "color": "GREEN", "kind": "passed", "heals": 0, "maxLlmCalls": 0 }
+  },
+  {
+    "name": "heal-v2-broken",
+    "description": "P3 chain, step 4: v2-broken from the v2 cache: no healing noise, RED on the state delta.",
+    "intent": "intents/checkout.json",
+    "target": "v2-broken",
+    "plan": "evals/plans/checkout.reflowed.json",
+    "cache": "after:heal-v2-cached",
+    "expect": { "color": "RED", "kind": "real_bug", "failedChecks": ["state"], "heals": 0, "maxLlmCalls": 0, "healerBelievedDone": true }
   },
   {
     "name": "provider-switch",
