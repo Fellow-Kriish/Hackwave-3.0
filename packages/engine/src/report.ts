@@ -118,6 +118,8 @@ function notionsOfDone(verdict: Verdict): string[] {
   return [
     '## Two notions of done',
     '',
+    `**${healerLine(verdict)} — verifier: ${verdict.color}**`,
+    '',
     `- Healer (soft, reads only the page): ${healerLine(verdict).replace(/^healer /, '')}`,
     `- Verifier (hard, reads the system of record): ${verdict.color} · ${KIND_LABEL[verdict.kind]}${failing ? `: ${CHECK_LABEL[failing]} failed, ${verdict.oracle[failing].summary}` : ''}`,
     `- Final page: ${verdict.oracle.finalHeading ? `"${verdict.oracle.finalHeading}"` : '(no heading)'} at ${verdict.oracle.finalUrl ?? '(unknown)'}`,

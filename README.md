@@ -1,8 +1,13 @@
 # Hackwave-3.0
 
 Intent-based, self-healing E2E testing: tests that describe intent, heal their own path, and cannot lie about the outcome.
-The build plan is [docs/BUILD.md](docs/BUILD.md). Status: **P5 (reporter and developer experience) complete.** The
-provider-switch eval currently runs groq and the custom driver pointed at Groq; a second vendor is still to be added.
+The build plan is [docs/BUILD.md](docs/BUILD.md). Status: **P6 (demo hardening) complete; feature freeze declared.** From
+here on, only a fix for a red eval fixture changes code, config or prompts (see [CLAUDE.md](CLAUDE.md)). The provider-switch
+eval currently runs groq and the custom driver pointed at Groq; a second vendor is still to be added.
+
+A self-healing test that heals past a real bug is worse than a brittle test. This one can't: the model plans and finds
+elements, while a pure-code verifier with no model in it decides pass or fail against the system of record (the orders
+store), and the verifier never moves.
 
 ## Quick start
 
@@ -28,6 +33,82 @@ SHOP_VERSION=v2-wrong-total PORT=5174 SHOP_TEST_MODE=1 pnpm --filter @hackwave/s
 # PowerShell
 $env:SHOP_VERSION='v2-wrong-total'; $env:PORT='5174'; $env:SHOP_TEST_MODE='1'; pnpm --filter @hackwave/shop serve
 ```
+
+## The demo
+
+With the shops up (`pnpm shop` in one terminal), one command runs the four acts, headed with slowMo 300 ms, offline from
+the committed `runs/llm-cache` (no `.env`, no API key, no network to any model):
+
+```sh
+pnpm demo                      # about 1 minute; add --cues for the presenter's lines, --video to record each act
+```
+
+It checks the three shops, restores `runs/snapshots/post-act-1` (act 1's caches: the v1 plan built from the goal and
+v1-warm locators), resets each store before its act, runs the acts in order, prints a summary, and puts the caches back.
+Each act's cache state is the one the act before it left.
+
+| Act | Target | What the audience sees | Line to say |
+| --- | --- | --- | --- |
+| 1 | v1 | GREEN; the plan built from the goal; every step on rung 1 | "This is a normal test. Boring on purpose." |
+| 2 | v2 | AMBER; heal lines stream live: Add to cart on rung 2, the bag drawer and "Proceed to payment" on rung 3, payment re-planned around the new Phone field, Pay ₹1,299 on rung 3; then the heal diff and the PR block | "Three broken selectors, a reordered flow, a new required field. Zero engineer-hours. And it wrote the fix." |
+| 3 | v2-broken | 0 heals, the page says "Thanks! Order ORD-4821 is on its way", then RED: healer believed done; verifier: 0 new orders; the hypothesis points at the order POST handler | "Same UI. The page says confirmed. The store says nothing was saved. An agent would have passed this." |
+| 4 | v2 | GREEN, 0 model calls; the report names the run that healed the locators | "Healing is a one-time cost. The cache learned." |
+
+Act 3 runs after act 2 because v2-broken shares v2's UI: act 2's cache fits it, so the RED is the oracle alone.
+
+Before going on stage: `pnpm engine doctor` passes, the three shops are up, and nothing on the demo laptop has been
+upgraded since the freeze. Options: `--with-wrong-total` adds a fifth act on the reserve bug (order saved at ₹999),
+`--headless` drops the window, `--slow-mo <ms>` changes the pace, `--keep-caches` leaves act 4's caches in place.
+
+Fallbacks, in order: every demo writes `runs/demo-<time>/index.html`, linking each act's `report.html` (and, with
+`--video`, each act's browser recording, `video.webm`); then a screen recording of the terminal, made with any recorder
+during a rehearsal. If a judge asks to flip live: the engine takes any target URL, and the reserve bug is one env flag away.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  intent["intent.json<br/>goal · inputs · oracle"]
+  intent -- "goal + input keys<br/>(redactForHealer)" --> planner["Planner<br/>strong model, once"]
+  planner --> plancache[("runs/plans")]
+  plancache --> executor
+  intent -- "input values, by key" --> executor["Executor (Playwright)<br/>milestones in adaptive order<br/>settle gate · progress check · budgets"]
+  executor --> ladder["Resolution ladder<br/>1 cached locator · 2 similarity<br/>3 fast model per screen · 5 re-plan"]
+  ladder <--> locators[("runs/locators")]
+  ladder -. "rungs 3 and 5" .-> llm["LLM adapter<br/>live · record · replay"]
+  planner -. calls .-> llm
+  llm <--> llmcache[("runs/llm-cache")]
+  intent -- "oracle only" --> verifier["Verifier<br/>pure code, no model"]
+  executor -- "run record + page" --> verifier
+  verifier -- "orders store, final page" --> verdict{{"GREEN · AMBER · RED · GREY"}}
+  verdict --> reporter["Reporter<br/>report.md / .html · heal diff · PR block"]
+  reporter -. "RED hypothesis, after the verdict" .-> llm
+```
+
+The oracle reaches only the verifier; the planner, resolver and re-planner see the goal and input keys, never a value. The
+verifier cannot import the LLM adapter (a lint rule fails the build if it tries), and the model never decides a verdict.
+
+## Positioning
+
+What decides success:
+
+| Tool | What decides success | Rename | Reorder | Explains and emits a fix | Steady-state cost |
+| --- | --- | --- | --- | --- | --- |
+| Healenium | DOM similarity on selectors | partly | no | no; a heal onto the wrong button still passes | low |
+| Stagehand and browser agents | the model's opinion that the goal is complete | yes | yes | no diff; every run pays the model | high |
+| This engine | code oracle on the orders store | yes, rungs 2 and 3 | yes, milestones plus re-plan | heal diff, PR block, cache update | 0 LLM calls once cached |
+
+Agents optimise for completing the goal; tests must optimise for telling the truth.
+
+Questions judges ask:
+
+- How do you know it isn't hallucinating success? The verifier has no LLM dependency and checks the backend; the oracle is stripped before any model sees the intent; v2-broken is the live proof.
+- What does it cost? The ladder is cheap first: act 2 makes 6 model calls for a full redesign, and the re-run makes none.
+- Is it flaky? Settle gate, objective validation, bounded budgets, GREY for the environment, loop detection; 20 eval fixtures run on every change.
+- Why not just getByRole? That is the cache format. It still breaks on renames and reorders; the ladder fixes those.
+- Why no screenshots? Rung 4 is designed and flagged off: the accessibility tree is cheaper and more precise.
+- What else does the oracle catch? Wrong totals (`pnpm demo --with-wrong-total`), duplicate submissions, confirmations never shown to the user.
+- Blast radius? An action allowlist, same origin only, no uploads, no HTTP outside the app.
 
 ## Run a test
 
@@ -154,7 +235,7 @@ pnpm engine eval v1-baseline --llm-mode record   # record the planner's calls fo
 pnpm engine eval v1-baseline                     # replay them: no key needed
 ```
 
-Commit `runs/llm-cache`, `runs/plans` and `runs/locators`; never commit `.env`.
+Commit `runs/llm-cache` (with its manifest), `runs/plans`, `runs/locators` and `runs/snapshots/post-act-1`; never commit `.env`.
 
 `pnpm engine eval provider-switch` runs v1 live once per provider that has `LLM_SWITCH_<PROVIDER>_MODEL` (and a key) in `.env`,
 skipping the rest. A profile without its own key reuses `LLM_API_KEY` only when it points at the same host, and two
@@ -172,6 +253,8 @@ pnpm engine eval v2-drift --headed --slow-mo 250   # watch any fixture's browser
 pnpm --filter @hackwave/shop smoke    # shopper-style checkout on all three shops (shops must be running)
 pnpm --filter @hackwave/shop a11y     # axe scan of every page state (shops must be running)
 pnpm engine doctor --reset            # also clears every store; the next order id is 4821
+pnpm engine snapshot save post-act-1  # copy runs/plans and runs/locators to runs/snapshots/post-act-1 (restore puts them back; list shows all)
+pnpm engine eval replay-complete      # the whole demo, headless, replay with every LLM variable blanked: no misses, under 4 minutes
 ```
 
 ## Layout
@@ -181,10 +264,11 @@ pnpm engine doctor --reset            # also clears every store; the next order 
 | apps/shop | React + Vite storefront and Express API; one codebase, variants selected by `SHOP_VERSION` |
 | packages/contracts | Zod schemas for intents, plans, events, run records and verdicts; `redactForHealer` |
 | packages/verifier | the oracle: state delta, UI-to-state binding, no-alerts, evidence bundle, the verdict decision table. No LLM (lint-enforced) |
-| packages/engine | CLI (`doctor`, `run`, `eval`, `lint`, `init`), planner, executor (adaptive milestone order, resolution ladder rungs 1–3, rung-5 re-planner, locator cache), settle gate, console stream, reporter (report.md and .html, RED explainer), `events.jsonl`, timing hooks |
+| packages/engine | CLI (`doctor`, `run`, `eval`, `lint`, `init`, `snapshot`, `demo`), planner, executor (adaptive milestone order, resolution ladder rungs 1–3, rung-5 re-planner, locator cache), settle gate, console stream, reporter (report.md and .html, RED explainer), `events.jsonl`, timing hooks |
 | packages/engine/src/llm | the only door to a model: provider drivers, record/replay cache, schema validation with one retry, telemetry |
 | prompts/ | the planner, resolver, re-planner and explainer prompts, each with a version line; their hashes are part of every cache key |
 | runs/plans, runs/locators, runs/llm-cache | committed caches: the planned plan, the healed locators and the recorded model calls |
+| runs/snapshots/post-act-1 | committed: the plan and locator caches as act 1 leaves them; the demo and the v2-drift fixture start from it |
 | intents/ | test intents: the goal, inputs and the frozen oracle |
 | evals/ | fixtures with expected verdicts, and the hand-written plans (v1, v2, and v1's labels reflowed for v2) |
 | engine.config.json | every budget, threshold, model tier and port |

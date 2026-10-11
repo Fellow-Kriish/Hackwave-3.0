@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { VerdictColorSchema, VerdictKindSchema, type Verdict } from '@hackwave/contracts';
 import { z } from 'zod';
 import { loadConfig, type EngineConfig } from './config';
@@ -10,7 +10,9 @@ import { findRepoRoot } from './paths';
 import { planCacheFile } from './plan-cache';
 import { banner, healerLine } from './report';
 import { runIntent, SetupError, type PlanSourceKind, type RunResult } from './run';
-import { startPrivateShop, type PrivateShop } from './shop-process';
+import { runDemo } from './demo';
+import { resetStore, startPrivateShop, type PrivateShop } from './shop-process';
+import { captureCaches, putBackCaches, restoreSnapshot } from './snapshot';
 
 const CHECKS = ['state', 'binding', 'alerts'] as const;
 /** Pause between live provider-switch profiles on the same host, so its per-minute token limit refills. */
@@ -53,14 +55,31 @@ const FixtureSchema = z.strictObject({
   plan: z.string().optional(),
   /**
    * Cache state before the run: empty (plan and locator caches cleared), committed (as they were when the eval
-   * started, i.e. the committed files), after:<fixture> (left as that fixture left it).
+   * started, i.e. the committed files), snapshot:<name> (runs/snapshots/<name>), after:<fixture> (left as that
+   * fixture left it).
    */
-  cache: z.union([z.enum(['empty', 'committed']), z.string().regex(/^after:[a-z0-9-]+$/)]).optional(),
+  cache: z.union([z.enum(['empty', 'committed']), z.string().regex(/^(after|snapshot):[a-z0-9-]+$/)]).optional(),
   /** Run once per provider that has a key and model in .env, in live mode; providers without one are skipped. */
   providerSwitch: z.boolean().default(false),
-  expect: ExpectSchema,
-});
+  /** Run the whole demo (all acts, their own expectations) in replay with no API key, instead of one intent. */
+  demo: z.boolean().default(false),
+  /** For a demo fixture: the most it may take, end to end. */
+  maxSeconds: z.number().int().positive().optional(),
+  expect: ExpectSchema.optional(),
+}).refine((fixture) => fixture.demo || fixture.expect !== undefined, 'a fixture needs "expect" unless it is a demo fixture');
 type Fixture = z.infer<typeof FixtureSchema>;
+
+/** Every LLM variable blanked: what a fresh clone with no .env has. Replay must not need any of them. */
+const NO_LLM_ENV: Record<string, string | undefined> = {
+  LLM_MODE: 'replay',
+  LLM_PROVIDER: undefined,
+  LLM_API_KEY: undefined,
+  LLM_BASE_URL: undefined,
+  LLM_MODEL_STRONG: undefined,
+  LLM_MODEL_FAST: undefined,
+  LLM_PROVIDER_FAST: undefined,
+  LLM_API_KEY_FAST: undefined,
+};
 
 function compare(expect: Expect, verdict: Verdict, planSource: PlanSourceKind, report: string): string[] {
   const problems: string[] = [];
@@ -105,13 +124,6 @@ function compare(expect: Expect, verdict: Verdict, planSource: PlanSourceKind, r
 function readReport(runDir: string): string {
   const file = join(runDir, 'report.md');
   return existsSync(file) ? readFileSync(file, 'utf8') : '';
-}
-
-async function resetStore(origin: string): Promise<void> {
-  const response = await fetch(`${origin}/api/_test/reset`, { method: 'POST', signal: AbortSignal.timeout(3000) }).catch((error: unknown) => {
-    throw new SetupError(`${origin} is not reachable (${error instanceof Error ? error.message : String(error)}); start the shops with pnpm shop`);
-  });
-  if (!response.ok) throw new SetupError(`reset on ${origin} returned HTTP ${response.status}; is SHOP_TEST_MODE=1?`);
 }
 
 function loadFixtures(root: string): Fixture[] {
@@ -170,30 +182,6 @@ export function switchProfiles(config: EngineConfig, env: Readonly<Record<string
   });
 }
 
-const CACHE_DIRS = [join('runs', 'plans'), join('runs', 'locators')];
-
-/** The committed plan and locator caches, so an eval run can put them back exactly as it found them. */
-function snapshotCaches(root: string): Map<string, string> {
-  const files = new Map<string, string>();
-  for (const dir of CACHE_DIRS) {
-    const full = join(root, dir);
-    if (!existsSync(full)) continue;
-    for (const name of readdirSync(full)) files.set(join(full, name), readFileSync(join(full, name), 'utf8'));
-  }
-  return files;
-}
-
-function restoreCaches(root: string, files: ReadonlyMap<string, string>): void {
-  for (const dir of CACHE_DIRS) {
-    const full = join(root, dir);
-    if (!existsSync(full)) continue;
-    for (const name of readdirSync(full)) if (!files.has(join(full, name))) rmSync(join(full, name), { force: true });
-  }
-  for (const [file, content] of files) {
-    mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, content);
-  }
-}
 
 /**
  * The test for the test tool: reset the target store, set the cache state, run the intent, compare the
@@ -218,12 +206,12 @@ export async function runEvals(options: {
   const selected = wanted.length > 0 ? fixtures.filter((fixture) => wanted.includes(fixture.name)) : fixtures;
   const modeOverride: Record<string, string> = options.llmMode ? { LLM_MODE: options.llmMode } : {};
   // Taken always: "committed" fixtures start from it. Put back at the end unless keepCaches.
-  const savedCaches = snapshotCaches(root);
+  const savedCaches = captureCaches(root);
   try {
     const view = { verbose: options.verbose ?? false, headed: options.headed ?? false, slowMo: options.slowMo ?? 0 };
     return await runSelected(root, config, selected, modeOverride, view, savedCaches);
   } finally {
-    if (!options.keepCaches) restoreCaches(root, savedCaches);
+    if (!options.keepCaches) putBackCaches(root, savedCaches);
   }
 }
 
@@ -269,9 +257,27 @@ async function runSelected(
     }
     ran.add(fixture.name);
     const started = Date.now();
+    if (fixture.demo) {
+      try {
+        const result = await runDemo({ headed: options.headed, slowMo: options.slowMo, video: false, cues: false, keepCaches: false, withWrongTotal: false, envOverride: NO_LLM_ENV, quiet: !options.verbose });
+        const problems = [...result.problems];
+        if (fixture.maxSeconds !== undefined && result.ms > fixture.maxSeconds * 1000) problems.push(`took ${(result.ms / 1000).toFixed(0)} s, over ${fixture.maxSeconds} s`);
+        const acts = result.acts.map((act) => `act ${act.act.act} ${act.verdict.color}`).join(', ');
+        if (problems.length === 0) passed++;
+        else failed++;
+        console.log(`${(problems.length === 0 ? green : red)(`  ${problems.length === 0 ? '✓' : '✗'} ${fixture.name}`)}  ${acts} · ${(result.ms / 1000).toFixed(1)} s, replay with no API key`);
+        for (const problem of problems) console.log(red(`      ${problem}`));
+        console.log(dim(`      ${relative(root, result.folder)}`));
+      } catch (error) {
+        failed++;
+        console.log(red(`  ✗ ${fixture.name}: ${error instanceof Error ? error.message : String(error)}`));
+      }
+      continue;
+    }
     let shop: PrivateShop | null = null;
     try {
-      if (!fixture.target) throw new SetupError('fixture has no target');
+      if (!fixture.target || !fixture.expect) throw new SetupError('fixture has no target or no expect');
+      const expect = fixture.expect;
       const intentFile = join(root, fixture.intent);
       const intentId = loadIntent(intentFile).id;
       const cacheFile = planCacheFile(root, intentId);
@@ -289,8 +295,8 @@ async function runSelected(
         if (fixture.cache === 'empty') {
           for (const file of [cacheFile, locatorCacheFile(root, intentId), locatorCacheFile(root, intentId, true)]) rmSync(file, { force: true });
         }
-        // The committed caches are the state after act 1 (v1 planned and warmed) until P6 adds snapshots.
-        if (fixture.cache === 'committed') restoreCaches(root, committed);
+        if (fixture.cache === 'committed') putBackCaches(root, committed);
+        if (fixture.cache?.startsWith('snapshot:')) restoreSnapshot(root, fixture.cache.slice('snapshot:'.length));
         const killAfter = fixture.killAfterStep;
         const privateShop = shop;
         return runIntent({
@@ -311,7 +317,7 @@ async function runSelected(
 
       if (!fixture.providerSwitch) {
         const result = await run(modeOverride);
-        const problems = compare(fixture.expect, result.verdict, result.planSource, readReport(result.runDir));
+        const problems = compare(expect, result.verdict, result.planSource, readReport(result.runDir));
         if (problems.length === 0) passed++;
         else failed++;
         report(fixture.name, result, problems, started);
@@ -348,7 +354,7 @@ async function runSelected(
             LLM_API_KEY_FAST: '',
             LLM_BASE_URL: profile.baseUrl ?? '',
           });
-          const problems = compare(fixture.expect, result.verdict, result.planSource, readReport(result.runDir));
+          const problems = compare(expect, result.verdict, result.planSource, readReport(result.runDir));
           if (problems.length > 0) switchFailed = true;
           report(`${fixture.name}[${profile.provider}]`, result, problems, providerStarted);
         }

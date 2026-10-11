@@ -10,6 +10,7 @@
     "bootstrap": "pnpm install && pnpm --filter @hackwave/engine exec playwright install chromium",
     "shop": "pnpm --filter @hackwave/shop start",
     "engine": "tsx packages/engine/src/cli.ts",
+    "demo": "tsx packages/engine/src/cli.ts demo",
     "lint": "eslint .",
     "typecheck": "tsc -p apps/shop/tsconfig.json && tsc -p apps/shop/tsconfig.node.json && tsc -p packages/contracts/tsconfig.json && tsc -p packages/verifier/tsconfig.json && tsc -p packages/engine/tsconfig.json",
     "test": "vitest run",

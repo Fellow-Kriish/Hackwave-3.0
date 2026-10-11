@@ -1,0 +1,204 @@
+{
+  "intentId": "checkout-valid-card",
+  "goalHash": "42646300fc554447c62459c09323e1edc6cf86d228b65205616093c8c7596d70",
+  "promptHash": "4d0f0168a3c21c6edb8bbe3543a301e14b557b2654fc303331be65997df404ca",
+  "createdAt": "2026-10-11T03:51:42.679Z",
+  "milestones": [
+    {
+      "key": "cart",
+      "description": "Add Trail Runner shoes to the cart and open the cart.",
+      "dependsOn": [],
+      "completion": {
+        "kind": "heading",
+        "text": "Cart"
+      },
+      "terminal": false,
+      "steps": [
+        {
+          "key": "cart.add",
+          "action": "click",
+          "target": {
+            "role": "button",
+            "name": "Add to cart",
+            "synonyms": [],
+            "within": {
+              "role": "article",
+              "nameRef": "product"
+            }
+          }
+        },
+        {
+          "key": "cart.open",
+          "action": "click",
+          "target": {
+            "role": "button",
+            "name": "Cart ({n})",
+            "synonyms": []
+          }
+        }
+      ],
+      "expanded": true
+    },
+    {
+      "key": "checkout",
+      "description": "Review cart contents and proceed to checkout.",
+      "dependsOn": [
+        "cart"
+      ],
+      "completion": {
+        "kind": "heading",
+        "text": "Shipping"
+      },
+      "terminal": false,
+      "steps": [
+        {
+          "key": "checkout.proceed",
+          "action": "click",
+          "target": {
+            "role": "button",
+            "name": "Checkout",
+            "synonyms": []
+          }
+        }
+      ],
+      "expanded": true
+    },
+    {
+      "key": "shipping",
+      "description": "Enter shipping information.",
+      "dependsOn": [
+        "checkout"
+      ],
+      "completion": {
+        "kind": "filled"
+      },
+      "terminal": false,
+      "steps": [
+        {
+          "key": "shipping.name",
+          "action": "fill",
+          "target": {
+            "role": "textbox",
+            "name": "Full name",
+            "synonyms": []
+          },
+          "inputRef": "shipping.name"
+        },
+        {
+          "key": "shipping.street",
+          "action": "fill",
+          "target": {
+            "role": "textbox",
+            "name": "Street address",
+            "synonyms": []
+          },
+          "inputRef": "shipping.street"
+        },
+        {
+          "key": "shipping.city",
+          "action": "fill",
+          "target": {
+            "role": "textbox",
+            "name": "City",
+            "synonyms": []
+          },
+          "inputRef": "shipping.city"
+        },
+        {
+          "key": "shipping.pincode",
+          "action": "fill",
+          "target": {
+            "role": "textbox",
+            "name": "Pincode",
+            "synonyms": []
+          },
+          "inputRef": "shipping.pincode"
+        }
+      ],
+      "expanded": true
+    },
+    {
+      "key": "payment",
+      "description": "Enter payment information.",
+      "dependsOn": [
+        "shipping"
+      ],
+      "completion": {
+        "kind": "filled"
+      },
+      "terminal": false,
+      "steps": [
+        {
+          "key": "payment.card-number",
+          "action": "fill",
+          "target": {
+            "role": "textbox",
+            "name": "Card number",
+            "synonyms": []
+          },
+          "inputRef": "card.number"
+        },
+        {
+          "key": "payment.expiry",
+          "action": "fill",
+          "target": {
+            "role": "textbox",
+            "name": "Expiry (MM/YY)",
+            "synonyms": []
+          },
+          "inputRef": "card.expiry"
+        },
+        {
+          "key": "payment.cvv",
+          "action": "fill",
+          "target": {
+            "role": "textbox",
+            "name": "CVV",
+            "synonyms": []
+          },
+          "inputRef": "card.cvv"
+        },
+        {
+          "key": "payment.name",
+          "action": "fill",
+          "target": {
+            "role": "textbox",
+            "name": "Name on card",
+            "synonyms": []
+          },
+          "inputRef": "card.name"
+        }
+      ],
+      "expanded": true
+    },
+    {
+      "key": "place-order",
+      "description": "Place the order and view confirmation.",
+      "dependsOn": [
+        "payment"
+      ],
+      "completion": {
+        "kind": "heading",
+        "text": [
+          "Order confirmed",
+          "Thank you",
+          "Thanks",
+          "Order placed"
+        ]
+      },
+      "terminal": true,
+      "steps": [
+        {
+          "key": "place-order.submit",
+          "action": "click",
+          "target": {
+            "role": "button",
+            "name": "Place order",
+            "synonyms": []
+          }
+        }
+      ],
+      "expanded": true
+    }
+  ]
+}

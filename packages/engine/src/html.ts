@@ -5,11 +5,15 @@
 
 const escapeHtml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-/** Inline markup after escaping: `code`, then **bold** outside code. */
+/** Inline markup after escaping: `code`, then **bold** and [links](relative-or-http) outside code. */
 function inline(text: string): string {
   return escapeHtml(text)
     .split(/(`[^`]*`)/)
-    .map((part) => (part.startsWith('`') && part.endsWith('`') && part.length > 1 ? `<code>${part.slice(1, -1)}</code>` : part.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')))
+    .map((part) =>
+      part.startsWith('`') && part.endsWith('`') && part.length > 1
+        ? `<code>${part.slice(1, -1)}</code>`
+        : part.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/\[([^\]]+)\]\(((?:https?:\/\/|\.{0,2}\/)?[^)\s:]*)\)/g, '<a href="$2">$1</a>'),
+    )
     .join('');
 }
 
