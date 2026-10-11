@@ -1,0 +1,296 @@
+{
+  "intentId": "checkout-valid-card",
+  "entries": {
+    "cart.add": {
+      "locator": {
+        "role": "button",
+        "name": "Add to cart",
+        "within": {
+          "role": "article",
+          "nameRef": "product"
+        }
+      },
+      "fingerprint": {
+        "role": "button",
+        "name": "Add to cart",
+        "landmark": {
+          "role": "main",
+          "name": null
+        },
+        "siblingText": [
+          "Trail Runner"
+        ],
+        "href": null,
+        "type": "button"
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:03.808Z",
+      "rung": 1
+    },
+    "cart.open": {
+      "locator": {
+        "role": "button",
+        "name": "Cart ({n})"
+      },
+      "fingerprint": {
+        "role": "button",
+        "name": "Cart (1)",
+        "landmark": {
+          "role": "navigation",
+          "name": "Main"
+        },
+        "siblingText": [],
+        "href": null,
+        "type": "button"
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:04.109Z",
+      "rung": 1
+    },
+    "checkout.proceed": {
+      "locator": {
+        "role": "button",
+        "name": "Checkout"
+      },
+      "fingerprint": {
+        "role": "button",
+        "name": "Checkout",
+        "landmark": {
+          "role": "main",
+          "name": null
+        },
+        "siblingText": [],
+        "href": null,
+        "type": "button"
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:04.414Z",
+      "rung": 1
+    },
+    "payment.card-number": {
+      "locator": {
+        "role": "textbox",
+        "name": "Card number"
+      },
+      "fingerprint": {
+        "role": "textbox",
+        "name": "Card number",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Payment",
+          "Card number",
+          "Expiry (MM/YY)",
+          "CVV"
+        ],
+        "href": null,
+        "type": null
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:05.815Z",
+      "rung": 1
+    },
+    "payment.cvv": {
+      "locator": {
+        "role": "textbox",
+        "name": "CVV"
+      },
+      "fingerprint": {
+        "role": "textbox",
+        "name": "CVV",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Payment",
+          "Card number",
+          "Expiry (MM/YY)",
+          "CVV"
+        ],
+        "href": null,
+        "type": null
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:06.321Z",
+      "rung": 1
+    },
+    "payment.expiry": {
+      "locator": {
+        "role": "textbox",
+        "name": "Expiry (MM/YY)"
+      },
+      "fingerprint": {
+        "role": "textbox",
+        "name": "Expiry (MM/YY)",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Payment",
+          "Card number",
+          "Expiry (MM/YY)",
+          "CVV"
+        ],
+        "href": null,
+        "type": null
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:06.067Z",
+      "rung": 1
+    },
+    "payment.name": {
+      "locator": {
+        "role": "textbox",
+        "name": "Name on card"
+      },
+      "fingerprint": {
+        "role": "textbox",
+        "name": "Name on card",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Payment",
+          "Card number",
+          "Expiry (MM/YY)",
+          "CVV"
+        ],
+        "href": null,
+        "type": null
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:06.576Z",
+      "rung": 1
+    },
+    "place-order.submit": {
+      "locator": {
+        "role": "button",
+        "name": "Place order"
+      },
+      "fingerprint": {
+        "role": "button",
+        "name": "Place order",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Payment",
+          "Card number",
+          "Expiry (MM/YY)",
+          "CVV"
+        ],
+        "href": null,
+        "type": "submit"
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:06.911Z",
+      "rung": 1
+    },
+    "shipping.city": {
+      "locator": {
+        "role": "textbox",
+        "name": "City"
+      },
+      "fingerprint": {
+        "role": "textbox",
+        "name": "City",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Shipping",
+          "Full name",
+          "Street address",
+          "City"
+        ],
+        "href": null,
+        "type": null
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:05.235Z",
+      "rung": 1
+    },
+    "shipping.name": {
+      "locator": {
+        "role": "textbox",
+        "name": "Full name"
+      },
+      "fingerprint": {
+        "role": "textbox",
+        "name": "Full name",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Shipping",
+          "Full name",
+          "Street address",
+          "City"
+        ],
+        "href": null,
+        "type": null
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:04.702Z",
+      "rung": 1
+    },
+    "shipping.pincode": {
+      "locator": {
+        "role": "textbox",
+        "name": "Pincode"
+      },
+      "fingerprint": {
+        "role": "textbox",
+        "name": "Pincode",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Shipping",
+          "Full name",
+          "Street address",
+          "City"
+        ],
+        "href": null,
+        "type": null
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:05.505Z",
+      "rung": 1
+    },
+    "shipping.street": {
+      "locator": {
+        "role": "textbox",
+        "name": "Street address"
+      },
+      "fingerprint": {
+        "role": "textbox",
+        "name": "Street address",
+        "landmark": {
+          "role": "form",
+          "name": "Checkout"
+        },
+        "siblingText": [
+          "Shipping",
+          "Full name",
+          "Street address",
+          "City"
+        ],
+        "href": null,
+        "type": null
+      },
+      "updatedByRun": "20261011T051602Z-checkout-valid-card-localhost-5171",
+      "updatedAt": "2026-10-11T05:16:04.968Z",
+      "rung": 1
+    }
+  }
+}

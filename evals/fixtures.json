@@ -225,10 +225,10 @@
   },
   {
     "name": "v2-drift",
-    "description": "v2 from the committed caches (act 1: the v1 plan and v1-warm locators): at least one rung-2, one rung-3 and one re-plan event; locator and plan caches updated.",
+    "description": "v2 from runs/snapshots/post-act-1 (act 1: the v1 plan and v1-warm locators): at least one rung-2, one rung-3 and one re-plan event; locator and plan caches updated.",
     "intent": "intents/checkout.json",
     "target": "v2",
-    "cache": "committed",
+    "cache": "snapshot:post-act-1",
     "expect": {
       "color": "AMBER",
       "kind": "ui_drift",
@@ -285,7 +285,10 @@
       "reportIncludes": [
         "> The page said",
         "## Two notions of done",
-        "## Hypothesis"
+        "## Hypothesis",
+        "healer believed done at step",
+        "— verifier: RED",
+        "found 0"
       ]
     }
   },
@@ -340,12 +343,9 @@
   },
   {
     "name": "replay-complete",
-    "description": "All four acts from the committed llm-cache with no API key present: no cache misses.",
-    "pending": "P6",
+    "description": "All four acts of the demo, from runs/snapshots/post-act-1 and the committed llm-cache, with no API key present: every act as scripted, no cache misses, under 4 minutes.",
     "intent": "intents/checkout.json",
-    "cache": "committed",
-    "expect": {
-      "color": "GREEN"
-    }
+    "demo": true,
+    "maxSeconds": 240
   }
 ]

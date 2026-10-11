@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { rmSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import {
   emptyRungHistogram,
@@ -49,6 +49,8 @@ export interface RunOptions {
   planFile?: string;
   headed?: boolean;
   slowMo?: number;
+  /** Record the browser to video.webm in the run folder (the demo's fallback recording). */
+  video?: boolean;
   /** Suppress the console stream and final block (evals print their own summary). */
   quiet?: boolean;
   /** Eval hook, awaited after every action. */
@@ -214,7 +216,12 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
 
   const browser = await chromium.launch({ headless: !options.headed, slowMo: options.slowMo ?? 0 });
   try {
-    const context = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 1280, height: 800 } });
+    const viewport = { width: 1280, height: 800 };
+    const context = await browser.newContext({
+      reducedMotion: 'reduce',
+      viewport,
+      ...(options.video ? { recordVideo: { dir: join(runDir, 'video-raw'), size: viewport } } : {}),
+    });
     // Blast radius: no HTTP outside the app.
     await context.route('**/*', async (route) => {
       const url = route.request().url();
@@ -353,6 +360,16 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
     writeFileSync(join(runDir, 'report.md'), markdown);
     writeFileSync(join(runDir, 'report.html'), markdownToHtml(markdown, `${banner(verdict)} · ${intent.id}`));
     if (!options.quiet) printFinalBlock(verdict, reportContext);
+    if (options.video) {
+      // The recording is finished only once its context closes.
+      const video = page.video();
+      await context.close();
+      if (video) {
+        await video.saveAs(join(runDir, 'video.webm'));
+        await video.delete();
+      }
+      rmSync(join(runDir, 'video-raw'), { recursive: true, force: true });
+    }
     return { verdict, runDir, planSource };
   } finally {
     await browser.close();

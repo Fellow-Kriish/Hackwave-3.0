@@ -2,18 +2,25 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { loadConfig } from './config';
+import { runDemo } from './demo';
 import { runDoctor, type Check } from './doctor';
 import { loadDotEnv } from './env';
 import { runEvals } from './evals';
 import { idFromGoal, scaffoldIntent } from './init';
 import { formatLint, lintIntentText } from './intent-lint';
 import { findRepoRoot } from './paths';
+import { listSnapshots, restoreSnapshot, saveSnapshot } from './snapshot';
 import { exitCodeFor, runIntent, SetupError } from './run';
 
 const USAGE = `usage: pnpm engine <command> [options]
 
 available now:
-  doctor [--reset]                       preflight: shop ports, reset endpoint, baseline, browser, replay cache
+  demo                                   the four acts in replay, headed with slowMo 300, from runs/snapshots/post-act-1
+      [--cues] [--video] [--headless]    presenter lines; video.webm per act; no browser window
+      [--slow-mo <ms>] [--keep-caches]   leave the caches as act 4 left them
+      [--with-wrong-total]               a fifth act on the reserve bug (order saved at the wrong price)
+      [--llm-mode replay|record|live]    replay unless told otherwise; record fills gaps in runs/llm-cache
+  doctor [--reset]                       preflight: Node, shops, reset endpoint, baseline, browser, replay cache, prompts, intents
   run --intent <file> --target <url>     one execution; streams events and writes a run folder under runs/
       [--plan <file>]                    a hand-written plan; without it the cached plan or the planner is used
       [--llm-mode live|record|replay]    overrides LLM_MODE (replay needs no API key)
@@ -24,15 +31,14 @@ available now:
       [--headed] [--slow-mo <ms>]        watch every fixture's browser
   lint <intent...>                       checks intent files: JSON, schema, inputs, placeholders; one line per problem
   init <goal> [--id <id>] [--out <file>] scaffolds intents/<id>.json from a goal sentence, with TODOs that lint flags
+  snapshot save|restore <name>           copies the plan and locator caches to or from runs/snapshots/<name>
+  snapshot list
 
-planned (docs/BUILD.md):
-  snapshot save|restore <name>           P6
-  demo                                   P6
-
-exit codes: run and eval 0 GREEN or AMBER · 1 RED · 2 GREY · 3 setup error; lint 0 clean · 1 problems`;
-
-const PLANNED: Record<string, string> = { snapshot: 'P6', demo: 'P6' };
+exit codes: run and eval 0 GREEN or AMBER · 1 RED · 2 GREY · 3 setup error; demo 0 as scripted · 1 not;
+            lint 0 clean · 1 problems`;
 const LLM_MODES = new Set(['live', 'record', 'replay']);
+/** The doc's stage setting: slow enough for an audience to follow each click. */
+const DEMO_SLOW_MO_MS = 300;
 
 function llmMode(value: string | undefined): string | undefined {
   if (value !== undefined && !LLM_MODES.has(value)) throw new SetupError(`--llm-mode must be live, record or replay (got "${value}")`);
@@ -164,9 +170,58 @@ async function main(argv: string[]): Promise<number> {
   if (command === 'eval') return evaluate(args);
   if (command === 'lint') return lint(args);
   if (command === 'init') return init(args);
-  const phase = PLANNED[command];
-  console.error(phase ? `"${command}" is planned for ${phase} and not built yet.` : `Unknown command "${command}".\n\n${USAGE}`);
+  if (command === 'snapshot') return snapshot(args);
+  if (command === 'demo') return demo(args);
+  console.error(`Unknown command "${command}".\n\n${USAGE}`);
   return 2;
+}
+
+function snapshot(args: string[]): number {
+  const [action, name] = parseArgs({ args, strict: true, allowPositionals: true, options: {} }).positionals;
+  const root = findRepoRoot();
+  try {
+    if (action === 'list') {
+      const names = listSnapshots(root);
+      console.log(names.length > 0 ? names.join('\n') : 'no snapshots yet; save one with pnpm engine snapshot save <name>');
+      return 0;
+    }
+    if ((action !== 'save' && action !== 'restore') || !name) throw new SetupError('usage: pnpm engine snapshot save|restore <name>, or snapshot list');
+    const files = action === 'save' ? saveSnapshot(root, name) : restoreSnapshot(root, name);
+    const where = `runs/snapshots/${name}`;
+    console.log(action === 'save' ? `saved ${files.length} cache file(s) to ${where}: ${files.join(', ')}` : `restored ${files.length} cache file(s) from ${where}: ${files.join(', ')}`);
+    return 0;
+  } catch (error) {
+    if (error instanceof SetupError) throw error;
+    throw new SetupError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function demo(args: string[]): Promise<number> {
+  const { values } = parseArgs({
+    args,
+    strict: true,
+    options: {
+      cues: { type: 'boolean', default: false },
+      video: { type: 'boolean', default: false },
+      headless: { type: 'boolean', default: false },
+      'slow-mo': { type: 'string' },
+      'keep-caches': { type: 'boolean', default: false },
+      'with-wrong-total': { type: 'boolean', default: false },
+      'llm-mode': { type: 'string' },
+    },
+  });
+  const result = await runDemo({
+    headed: !values.headless,
+    slowMo: values['slow-mo'] === undefined ? DEMO_SLOW_MO_MS : slowMoOf(values['slow-mo']),
+    video: values.video,
+    cues: values.cues,
+    keepCaches: values['keep-caches'],
+    withWrongTotal: values['with-wrong-total'],
+    // The demo runs from the recorded cache unless asked otherwise: no key, no network, the same replies every time.
+    envOverride: { LLM_MODE: llmMode(values['llm-mode']) ?? 'replay' },
+    quiet: false,
+  });
+  return result.problems.length === 0 ? 0 : 1;
 }
 
 main(process.argv.slice(2)).then(

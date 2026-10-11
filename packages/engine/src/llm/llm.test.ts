@@ -156,6 +156,26 @@ describe('drivers', () => {
     });
     expect(denied.calls).toHaveLength(1);
   });
+
+  it('retries a connection that failed before any response, but not its own timeout', async () => {
+    const ok = scripted([{ content: '{"answer":1}' }]);
+    let attempts = 0;
+    const flaky: FetchLike = async (url, init) => {
+      attempts++;
+      if (attempts === 1) throw new TypeError('fetch failed', { cause: Object.assign(new Error('Connect Timeout Error'), { code: 'UND_ERR_CONNECT_TIMEOUT' }) });
+      return ok.fetchImpl(url, init);
+    };
+    expect(await adapter('live', flaky).call({ stage: 'planner', prompt, input: 'x', schema })).toEqual({ answer: 1 });
+    expect(attempts).toBe(2);
+
+    let timedOut = 0;
+    const slow: FetchLike = async () => {
+      timedOut++;
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    };
+    await expect(adapter('live', slow).call({ stage: 'planner', prompt, input: 'x', schema })).rejects.toMatchObject({ code: 'llm_unavailable' });
+    expect(timedOut).toBe(1);
+  });
 });
 
 describe('adapter', () => {
