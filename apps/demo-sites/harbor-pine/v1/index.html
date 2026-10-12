@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Harbor & Pine V1 demo hotel booking site for software testing.">
+  <title>Harbor &amp; Pine | Hotel Booking Demo</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <a class="logo" href="#" data-testid="site-logo">Harbor &amp; Pine</a>
+    <nav>
+      <a href="#search">Find Rooms</a>
+      <a href="#results">Rooms</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <p class="eyebrow">YOUR NEXT STAY STARTS HERE</p>
+      <h1>Find a room that feels like home.</h1>
+      <p>Choose your dates, compare rooms, and make a demo reservation.</p>
+    </section>
+
+    <section id="search" class="panel">
+      <h2>Search Rooms</h2>
+      <form id="search-form" data-testid="search-form">
+        <div class="search-grid">
+          <div>
+            <label for="checkin">Check-in</label>
+            <input id="checkin" data-testid="checkin" type="date" required>
+          </div>
+          <div>
+            <label for="checkout">Check-out</label>
+            <input id="checkout" data-testid="checkout" type="date" required>
+          </div>
+          <div>
+            <label for="guests">Guests</label>
+            <select id="guests" data-testid="guests">
+              <option value="1">1 guest</option>
+              <option value="2" selected>2 guests</option>
+              <option value="3">3 guests</option>
+              <option value="4">4 guests</option>
+              <option value="5">5 guests</option>
+            </select>
+          </div>
+        </div>
+        <button class="button primary" type="submit" data-testid="search-button">Search Rooms</button>
+        <p id="search-message" class="message" data-testid="search-message" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section id="results" class="section">
+      <div class="section-heading">
+        <div>
+          <h2>Available Rooms</h2>
+          <p class="muted">Sample rooms for testing only.</p>
+        </div>
+        <span id="result-count" data-testid="result-count">6 rooms</span>
+      </div>
+      <div id="room-list" class="hotel-grid" data-testid="room-list"></div>
+    </section>
+
+    <section id="booking" class="panel" hidden>
+      <h2>Complete Your Reservation</h2>
+      <div id="booking-summary" class="booking-summary"></div>
+
+      <form id="booking-form" data-testid="booking-form">
+        <label for="guest-name">Full Name</label>
+        <input id="guest-name" data-testid="guest-name" type="text" required minlength="2"
+          placeholder="Enter your full name">
+
+        <label for="guest-email">Email Address</label>
+        <input id="guest-email" data-testid="guest-email" type="email" required placeholder="you@example.com">
+
+        <label for="guest-phone">Phone Number</label>
+        <input id="guest-phone" data-testid="guest-phone" type="tel" required pattern="[0-9]{10}" maxlength="10"
+          inputmode="numeric" placeholder="10-digit phone number">
+
+        <button class="button primary" type="submit" data-testid="confirm-booking">Confirm Booking</button>
+      </form>
+
+      <div id="booking-message" class="confirmation" data-testid="booking-message" role="status"
+        aria-live="polite" hidden></div>
+    </section>
+
+    <section class="panel testing-note">
+      <h2>Testing Information</h2>
+      <p>This is a demo application. Room inventory, pricing, and reservations are simulated. No real room is
+        booked and no payment is collected.</p>
+      <p id="app-status" data-testid="app-status">Application ready.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Harbor &amp; Pine © 2026 · Software Testing Demo</p>
+  </footer>
+</body>
+</html>

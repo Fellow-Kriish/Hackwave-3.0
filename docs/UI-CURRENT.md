@@ -74,6 +74,9 @@ Four tickable versions, each with a short code, a name and a one-line descriptio
 - **"Words it may type, if the goal needs any" field:** default `water bottle`.
 - **Note:** "Explore mode carries out the goal on any site, but nothing checks the result against the site's data. Its
   result is UNVERIFIED, never a pass. It needs the live model."
+- **Behaviour since 2026-10-12 (backend):** an address that a project in `projects/` claims (ShopSphere on ports
+  5181-5183, Harbor & Pine on 5191-5193, started with `pnpm sites`) runs as a verified test: its result card shows a real
+  GREEN, AMBER or RED with "The store holds" from the browser's storage. Any other address is still explore mode.
 
 ### Step 3: Goal, in plain words
 - **Text box:** prefilled with the recorded goal "As a shopper, buy the Trail Runner shoes with a valid credit card and

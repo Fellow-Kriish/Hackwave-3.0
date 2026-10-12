@@ -12,8 +12,9 @@ import { formatLint, lintIntentText } from './intent-lint';
 import { loadIntent } from './load';
 import { findRepoRoot } from './paths';
 import { listSnapshots, restoreSnapshot, saveSnapshot } from './snapshot';
-import { exitCodeFor, exploreGoal, runIntent, SetupError } from './run';
-import { exploreIntent, parseInputs } from './explore';
+import { exitCodeFor, exploreGoal, isVerified, runGoal, runIntent, SetupError } from './run';
+import { loadProjects, projectFor } from './projects';
+import { exploreIntent, parseInputs, passedUnverified } from './explore';
 import { fetchCatalog, typedIntent } from './typed-goal';
 import { startUiServer } from './ui/server';
 
@@ -40,8 +41,10 @@ available now:
       [--headed] [--slow-mo <ms>] [--llm-mode live|record|replay]   live by default: a new sentence has no recording
   ui [--port <n>] [--no-open]            the web app: type a goal, pick a version, watch it plan, act, heal and verify
       [--headless] [--slow-mo <ms>]      a browser window is shown with slowMo 300 unless told otherwise
+  projects [url]                         lists projects/*.json (one per app: where its source of truth lives) and,
+                                         given a URL, which project a run there loads
   explore "<goal>" --target <url>        any website: plans, clicks and heals, but checks nothing, so the result is
-      [--input key=value]...             UNVERIFIED (never a pass); --input gives it words to type, e.g. query="water bottle"
+      [--input key=value]...             passes tagged "unverified" (never GREEN); --input gives it words to type, e.g. query="water bottle"
       [--headless] [--slow-mo <ms>] [--llm-mode live|record|replay]   headed with slowMo 300 unless told otherwise
   lint <intent...>                       checks intent files: JSON, schema, inputs, placeholders; one line per problem
   init <goal> [--id <id>] [--out <file>] scaffolds intents/<id>.json from a goal sentence, with TODOs that lint flags
@@ -189,6 +192,7 @@ async function main(argv: string[]): Promise<number> {
   if (command === 'demo') return demo(args);
   if (command === 'ui') return ui(args);
   if (command === 'explore') return explore(args);
+  if (command === 'projects') return projectsCommand(args);
   console.error(`Unknown command "${command}".\n\n${USAGE}`);
   return 2;
 }
@@ -220,8 +224,13 @@ async function tryGoal(args: string[]): Promise<number> {
   } catch {
     throw new SetupError(`--target must be a URL, e.g. http://localhost:5171 (got "${values.target}")`);
   }
-  const base = loadIntent(resolve(values.data ?? join(root, 'intents', 'checkout.json')));
-  const { intent, notes } = typedIntent(goal, base.inputs, await fetchCatalog(origin));
+  const project = projectFor(asSetupErrorOf(() => loadProjects(root)), origin);
+  // Test data: --data names an intent to borrow from; otherwise the matched project's own, else the demo shop's.
+  const inputs = values.data || !project?.inputs ? loadIntent(resolve(values.data ?? join(root, 'intents', 'checkout.json'))).inputs : project.inputs;
+  const store = project ? (Object.keys(project.stores)[0] ?? 'orders') : 'orders';
+  const { intent, notes } = typedIntent(goal, inputs, await fetchCatalog(origin, fetch, project?.catalog), store);
+  // Each project keeps its own learned steps: the same sentence on two apps must not share a plan.
+  if (project) intent.id = intent.id.replace(/^typed-/, `typed-${project.id}-`);
   // Typed goals are scratch tests (git-ignored, caches included) unless saved as a real intent.
   if (values.save) intent.id = intent.id.replace(/^typed-/, '');
   const file = values.save ? join(root, 'intents', `${intent.id}.json`) : join(root, 'runs', 'typed', `${intent.id}.json`);
@@ -230,11 +239,13 @@ async function tryGoal(args: string[]): Promise<number> {
   writeFileSync(file, `${JSON.stringify(intent, null, 2)}\n`);
   const label = relative(root, file).replace(/\\/g, '/');
   console.log(`goal: "${goal}"`);
+  console.log(project ? `  project: ${project.name} (projects/${project.id}.json): its store is the source of truth` : `  project: none in projects/ matches ${origin}; without a readable store the result is tagged unverified`);
   for (const note of notes) console.log(`  ${note}`);
   console.log(`  intent written to ${label}${values.save ? ' (saved as a test you can commit)' : ' (a scratch test; --save keeps it under intents/)'}\n`);
   const mode = llmMode(values['llm-mode']) ?? 'live';
   try {
-    const { verdict } = await runIntent({
+    // A site with no source of truth does not stop the run: it can pass, tagged unverified, never GREEN.
+    const result = await runGoal({
       intentFile: file,
       target: values.target,
       headed: values.headed,
@@ -242,7 +253,7 @@ async function tryGoal(args: string[]): Promise<number> {
       // A sentence nobody typed before has nothing recorded: plan it with the model.
       envOverride: { LLM_MODE: mode },
     });
-    return exitCodeFor(verdict);
+    return isVerified(result) ? exitCodeFor(result.verdict) : passedUnverified(result) ? 0 : 2;
   } catch (error) {
     if (error instanceof SetupError && /needs a model/.test(error.message)) {
       throw new SetupError(`${error.message}\nA new goal is planned by the model: put LLM_API_KEY (and the models) in .env. The recorded demo needs none.`);
@@ -302,8 +313,8 @@ async function demo(args: string[]): Promise<number> {
 }
 
 /**
- * A goal on any website, with no verifier: the engine plans, acts and heals as usual, then reports UNVERIFIED.
- * Exit 0 when every step ran and the engine believes the goal was reached, 2 otherwise; never a pass.
+ * A goal on any website, with no verifier: the engine plans, acts and heals as usual. Exit 0 (passed, tagged
+ * unverified) when every step ran and the engine believes the goal was reached, 2 otherwise.
  */
 async function explore(args: string[]): Promise<number> {
   const { values, positionals } = parseArgs({
@@ -330,7 +341,7 @@ async function explore(args: string[]): Promise<number> {
     throw new SetupError(error instanceof Error ? error.message : String(error));
   }
   console.log(`goal: "${goal}"`);
-  console.log(`  explore mode: nothing checks the outcome against the site's data, so the result will be UNVERIFIED`);
+  console.log(`  explore mode: no source of truth is read, so the result is tagged unverified`);
   console.log(`  words it may type: ${Object.keys(intent.inputs).length > 0 ? Object.keys(intent.inputs).join(', ') : 'none (add --input query="..." if the goal needs typing)'}\n`);
   try {
     const result = await exploreGoal({
@@ -341,13 +352,50 @@ async function explore(args: string[]): Promise<number> {
       // A new site has nothing recorded: plan it with the model.
       envOverride: { LLM_MODE: llmMode(values['llm-mode']) ?? 'live' },
     });
-    return result.outcome === 'completed' && result.healerBelievedDone.believed ? 0 : 2;
+    return passedUnverified(result) ? 0 : 2;
   } catch (error) {
     if (error instanceof SetupError && /needs a model/.test(error.message)) {
       throw new SetupError(`${error.message}\nExplore mode plans with the model: put LLM_API_KEY (and the models) in .env.`);
     }
     throw error;
   }
+}
+
+function asSetupErrorOf<T>(work: () => T): T {
+  try {
+    return work();
+  } catch (error) {
+    throw new SetupError(error instanceof Error ? error.message : String(error));
+  }
+}
+
+/** Lists projects/*.json and, given a URL, which project (and so which source of truth) a run there would load. */
+function projectsCommand(args: string[]): number {
+  const projects = asSetupErrorOf(() => loadProjects(findRepoRoot()));
+  if (projects.length === 0) console.log('no projects in projects/: every run reads <target>/api/<store>');
+  for (const project of projects) {
+    const stores = Object.entries(project.stores).map(([name, store]) =>
+      store.kind === 'browser-storage' ? `${name} in the browser's localStorage["${store.key}"]` : `${name} at ${store.baseUrl ?? '<target>'}${store.list}`,
+    );
+    console.log(`${project.id}: ${project.name}
+  matches ${project.match.join(', ')}
+  stores ${stores.join('; ')}${project.catalog ? `
+  catalogue ${project.catalog.items ? `${project.catalog.items.length} products in the project file` : project.catalog.list}` : ''}`);
+  }
+  const [url] = args;
+  if (url) {
+    let origin: string;
+    try {
+      origin = new URL(url).origin;
+    } catch {
+      throw new SetupError(`not a URL: "${url}"`);
+    }
+    const project = projectFor(projects, origin);
+    console.log(project ? `
+${origin} loads ${project.id}` : `
+${origin} matches no project: runs read ${origin}/api/<store>, and goals typed with try are tagged unverified if there is none`);
+  }
+  return 0;
 }
 
 /** The web app on 127.0.0.1, until Ctrl+C. */
@@ -364,18 +412,34 @@ async function ui(args: string[]): Promise<number> {
   });
   const port = Number(values.port);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new SetupError(`--port must be a port number (got "${values.port}")`);
-  const server = await startUiServer({
-    port,
-    headed: !values.headless,
-    slowMo: values['slow-mo'] === undefined ? DEMO_SLOW_MO_MS : slowMoOf(values['slow-mo']),
-  }).catch((error: unknown) => {
-    throw new SetupError(error instanceof Error && 'code' in error && error.code === 'EADDRINUSE' ? `port ${port} is in use; pick another with --port` : String(error));
-  });
-  console.log(`HackWave web app: ${server.url}  (Ctrl+C to stop)`);
-  if (!values['no-open']) {
-    const [command, ...rest] = process.platform === 'win32' ? ['cmd', '/c', 'start', '""', server.url] : [process.platform === 'darwin' ? 'open' : 'xdg-open', server.url];
+  const openInBrowser = (url: string) => {
+    if (values['no-open']) return;
+    const [command, ...rest] = process.platform === 'win32' ? ['cmd', '/c', 'start', '""', url] : [process.platform === 'darwin' ? 'open' : 'xdg-open', url];
     spawn(command, rest, { stdio: 'ignore', detached: true, windowsVerbatimArguments: process.platform === 'win32' }).on('error', () => undefined).unref();
+  };
+  // Opening the app twice must not fail: if HackWave already serves this port, show that one; if something else holds
+  // it, take the next free port.
+  const options = { headed: !values.headless, slowMo: values['slow-mo'] === undefined ? DEMO_SLOW_MO_MS : slowMoOf(values['slow-mo']) };
+  let server: Awaited<ReturnType<typeof startUiServer>> | null = null;
+  for (let candidate = port; candidate < port + 10 && !server; candidate++) {
+    try {
+      server = await startUiServer({ port: candidate, ...options });
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'EADDRINUSE')) throw new SetupError(String(error));
+      const running = await fetch(`http://localhost:${candidate}/api/state`, { signal: AbortSignal.timeout(2000) })
+        .then(async (response) => (response.ok ? ((await response.json()) as { defaultGoal?: unknown }) : null))
+        .catch(() => null);
+      if (running && typeof running.defaultGoal === 'string') {
+        console.log(`HackWave is already running at http://localhost:${candidate}; opening it instead of starting a second copy.`);
+        openInBrowser(`http://localhost:${candidate}`);
+        return 0;
+      }
+      console.log(`port ${candidate} is used by another program; trying ${candidate + 1}`);
+    }
   }
+  if (!server) throw new SetupError(`ports ${port} to ${port + 9} are all in use; pick another with --port`);
+  console.log(`HackWave web app: ${server.url}  (Ctrl+C to stop)`);
+  openInBrowser(server.url);
   await new Promise<void>((resolveStop) => {
     // Ctrl+C, a kill, or closing the console window (SIGHUP on Windows): stop the app's shop with it.
     for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.once(signal, resolveStop);

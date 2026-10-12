@@ -31,6 +31,13 @@ export const OracleSchema = z.strictObject({
         items: z.array(z.string().min(1)).min(1).optional(),
         total: z.number().nonnegative().optional(),
         cardLast4: z.string().regex(/^\d{4}$/).optional(),
+        /** Units in the new record, summed over its items' quantities (an item without a quantity counts once). */
+        itemCount: z.number().int().positive().optional(),
+        /**
+         * The catalogue's price per product, written by code: the record's total must equal the sum of these prices
+         * times each item's quantity, whatever was bought, and every item must be in the list.
+         */
+        prices: z.record(z.string().min(1), z.number().nonnegative()).optional(),
       })
       .refine((match) => Object.values(match).some((value) => value !== undefined), 'match needs at least one field'),
     /** How long to wait for the record to appear; engine.config.json verifier.pollMs when absent. */

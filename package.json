@@ -9,6 +9,7 @@
   "scripts": {
     "bootstrap": "pnpm install && pnpm --filter @hackwave/engine exec playwright install chromium",
     "shop": "pnpm --filter @hackwave/shop start",
+    "sites": "node apps/demo-sites/serve.mjs",
     "engine": "tsx packages/engine/src/cli.ts",
     "demo": "tsx packages/engine/src/cli.ts demo",
     "ui": "tsx packages/engine/src/cli.ts ui",

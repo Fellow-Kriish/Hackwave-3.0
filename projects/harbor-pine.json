@@ -1,0 +1,29 @@
+{
+  "id": "harbor-pine",
+  "name": "Harbor & Pine hotel",
+  "match": [
+    "http://localhost:5191", "http://localhost:5192", "http://localhost:5193",
+    "http://127.0.0.1:5191", "http://127.0.0.1:5192", "http://127.0.0.1:5193"
+  ],
+  "stores": {
+    "reservations": {
+      "kind": "browser-storage",
+      "key": "harbor-pine-data",
+      "recordsPath": "reservations",
+      "fields": { "id": "bookingNumber", "items": "roomName", "total": "total" }
+    }
+  },
+  "catalog": {
+    "items": [
+      { "name": "Coastal King", "price": 149 },
+      { "name": "Garden Twin", "price": 129 },
+      { "name": "Harbor Suite", "price": 229 },
+      { "name": "Pine Family Suite", "price": 269 },
+      { "name": "Quiet Studio", "price": 119 },
+      { "name": "Signature Suite", "price": 319 }
+    ]
+  },
+  "inputs": {
+    "guest": { "name": "Kartik Test", "email": "kartik@example.com", "phone": "9876543210" }
+  }
+}

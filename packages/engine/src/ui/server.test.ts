@@ -57,6 +57,13 @@ describe('what a test request becomes', () => {
     expect(typeof batch === 'string' ? batch : batch.runs.map((run) => run.code)).toEqual(['A', 'B', 'B1', 'B']);
   });
 
+  it("runs a demo site's picked versions in order, always with the live model", () => {
+    const batch = parseBatch({ project: 'shopsphere', goal, versions: ['v1', 'v2', 'v3'], fresh: true, live: false }, false);
+    expect(batch).toMatchObject({ project: 'shopsphere', live: true, guided: false, runs: [{ code: 'V1', fresh: true }, { code: 'V2', fresh: false }, { code: 'V3', fresh: false }] });
+    expect(parseBatch({ project: 'harbor-pine', goal, versions: ['v9'] }, false)).toBe('unknown version "v9" for Harbor & Pine hotel');
+    expect(parseBatch({ project: 'harbor-pine', goal, versions: [] }, false)).toBe('pick at least one version');
+  });
+
   it('explores a website only at an http or https address, with optional words to type', () => {
     const batch = parseBatch({ project: 'website', goal, url: 'https://www.example.com/', query: '  water   bottle ' }, false);
     expect(batch).toMatchObject({ project: 'website', url: 'https://www.example.com/', query: 'water bottle', runs: [{ code: 'W', name: 'www.example.com' }] });
@@ -82,6 +89,10 @@ describe('the web app server', () => {
     expect(state.defaultGoal).toBe(knownIntentFor(root, state.defaultGoal)?.goal);
     expect(state.address).toMatch(/^http:\/\/localhost:\d+$/);
     expect(state).toMatchObject({ busy: false, deployed: null });
+    const { projects } = (await (await fetch(`${server.url}/api/state`)).json()) as { projects: { id: string; defaultGoal: string; versions: Record<string, unknown> }[] };
+    expect(projects.map((project) => project.id)).toEqual(['shop', 'shopsphere', 'harbor-pine']);
+    expect(projects.find((project) => project.id === 'harbor-pine')).toMatchObject({ defaultGoal: 'Book the Harbor Suite' });
+    expect(Object.keys(projects.find((project) => project.id === 'shopsphere')?.versions ?? {})).toEqual(['v1', 'v2', 'v3']);
   });
 
   it('refuses work it should not do, before any shop or browser starts', async () => {

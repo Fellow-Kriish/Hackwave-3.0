@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ShopSphere V3 demo e-commerce storefront for software testing.">
+  <title>ShopSphere — E-commerce V2</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <div class="announcement">V2 DEMO STORE <span>·</span> Free shipping on demo orders over $50</div>
+  <header class="site-header">
+    <a class="brand" href="#" aria-label="ShopSphere home" data-testid="brand-home"><span class="brand-mark">S</span> shopsphere<span class="brand-dot">.</span></a>
+    <form class="search" id="search-form" role="search">
+      <label class="sr-only" for="search-input">Search products</label>
+      <input id="search-input" data-testid="search-input" type="search" placeholder="Search products, brands..." autocomplete="off">
+      <button type="submit" aria-label="Search" data-testid="search-submit">⌕</button>
+    </form>
+    <nav class="header-actions" aria-label="Store actions">
+      <button class="icon-action" id="wishlist-toggle" data-testid="wishlist-toggle" type="button"><span aria-hidden="true">♡</span><span class="action-label">Wishlist</span><b id="wishlist-count">0</b></button>
+      <button class="icon-action cart-action" id="cart-toggle" data-testid="cart-toggle" type="button"><span aria-hidden="true">▣</span><span class="action-label">Cart</span><b id="cart-count">0</b></button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">THE EVERYDAY EDIT</p>
+        <h1>Good things.<br><em>Better finds.</em></h1>
+        <p>Thoughtful essentials for your space, your style, and everything in between.</p>
+        <a href="#catalog" class="primary-link" data-testid="shop-now">Explore the collection <span>↗</span></a>
+        <div class="hero-proof"><span class="proof-stars">★★★★★</span> <span>Made for everyday living</span></div>
+      </div>
+      <div class="hero-art" aria-label="Decorative product arrangement">
+        <div class="sun-shape"></div>
+        <div class="art-card art-card-one"><div class="vase"></div><span>OBJECTS FOR HOME</span></div>
+        <div class="art-card art-card-two"><div class="headphones"></div><span>TECH, REIMAGINED</span></div>
+        <div class="art-sticker">FIND<br>YOUR<br>FAVORITE</div>
+      </div>
+    </section>
+
+    <section class="benefits" aria-label="Store benefits">
+      <div><span>✦</span><p><b>Curated quality</b><small>Good picks, less scrolling</small></p></div>
+      <div><span>↗</span><p><b>Easy checkout</b><small>A simple demo flow</small></p></div>
+      <div><span>♡</span><p><b>Save your finds</b><small>Wishlist stays with you</small></p></div>
+      <div><span>□</span><p><b>Secure by design</b><small>Demo only, no real payments</small></p></div>
+    </section>
+
+    <section class="catalog-section" id="catalog">
+      <div class="section-heading">
+        <div><p class="eyebrow">A LITTLE BIT OF EVERYTHING</p><h2>Find your next favorite</h2><p class="muted">Useful things, picked with care.</p></div>
+        <div class="result-count" id="result-count" data-testid="result-count">0 products</div>
+      </div>
+      <div class="catalog-layout">
+        <aside class="filters">
+          <div class="filter-heading"><h3>Filter by</h3><button id="clear-filters" type="button" data-testid="clear-filters">Clear all</button></div>
+          <label class="field-label" for="category-filter">Category</label>
+          <select id="category-filter" data-testid="category-filter">
+            <option value="all">All categories</option>
+            <option value="Home">Home</option>
+            <option value="Tech">Tech</option>
+            <option value="Style">Style</option>
+            <option value="Wellness">Wellness</option>
+          </select>
+          <label class="field-label" for="sort-filter">Sort by</label>
+          <select id="sort-filter" data-testid="sort-filter">
+            <option value="featured">Featured</option>
+            <option value="price-low">Price: low to high</option>
+            <option value="price-high">Price: high to low</option>
+            <option value="rating">Top rated</option>
+            <option value="name">Name: A–Z</option>
+          </select>
+          <label class="field-label" for="max-price">Maximum price <strong id="price-label">$200</strong></label>
+          <input id="max-price" data-testid="max-price" type="range" min="10" max="200" step="5" value="200">
+          <div class="filter-note"><span>ⓘ</span> Products and prices are sample data for testing.</div>
+        </aside>
+        <div class="product-area">
+          <div id="active-filter-note" class="active-filter-note" aria-live="polite"></div>
+          <div class="product-grid" id="product-grid" data-testid="product-grid"></div>
+          <div class="empty-state hidden" id="empty-state" data-testid="empty-state"><span>⌕</span><h3>No matches just yet</h3><p>Try another search or clear your filters.</p><button class="secondary-button" id="empty-reset" type="button">Reset filters</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="newsletter">
+      <div><p class="eyebrow">THE GOOD THINGS NOTE</p><h2>A little inspiration, occasionally.</h2><p>Subscribe to test the form. No email will actually be sent.</p></div>
+      <form id="newsletter-form" class="newsletter-form">
+        <label class="sr-only" for="newsletter-email">Email address</label>
+        <input id="newsletter-email" type="email" placeholder="you@example.com" required data-testid="newsletter-email">
+        <button type="submit" data-testid="newsletter-submit">Sign me up ↗</button>
+      </form>
+      <p class="newsletter-status" id="newsletter-status" role="status"></p>
+    </section>
+  </main>
+
+  <footer class="site-footer"><a class="brand" href="#"><span class="brand-mark">S</span> shopsphere<span class="brand-dot">.</span></a><p>Practice store for software testing. No real purchases or payments.</p><button type="button" id="open-qa" class="footer-link">Open QA test panel ↗</button></footer>
+
+  <div class="overlay hidden" id="overlay" data-testid="overlay"></div>
+  <aside class="side-drawer hidden" id="cart-drawer" aria-label="Shopping cart" aria-modal="true" role="dialog" data-testid="cart-drawer">
+    <div class="drawer-header"><div><p class="eyebrow">YOUR SELECTION</p><h2>Your cart <span id="drawer-cart-count">(0)</span></h2></div><button class="close-button" data-close="cart" aria-label="Close cart">×</button></div>
+    <div class="drawer-content" id="cart-items" data-testid="cart-items"></div>
+    <div class="drawer-footer"><div class="subtotal"><span>Subtotal</span><strong id="cart-subtotal" data-testid="cart-subtotal">$0.00</strong></div><p class="shipping-note" id="shipping-note">Shipping calculated at checkout.</p><button id="checkout-button" class="full-button" type="button" data-testid="checkout-button">Continue to checkout <span>→</span></button><button class="text-button" data-close="cart" type="button">Keep browsing</button></div>
+  </aside>
+
+  <aside class="side-drawer hidden" id="wishlist-drawer" aria-label="Wishlist" aria-modal="true" role="dialog" data-testid="wishlist-drawer">
+    <div class="drawer-header"><div><p class="eyebrow">SAVED FOR LATER</p><h2>Your wishlist</h2></div><button class="close-button" data-close="wishlist" aria-label="Close wishlist">×</button></div>
+    <div class="drawer-content" id="wishlist-items" data-testid="wishlist-items"></div>
+    <div class="drawer-footer"><button class="full-button" data-close="wishlist" type="button">Back to shopping</button></div>
+  </aside>
+
+  <div class="modal hidden" id="checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title" data-testid="checkout-modal">
+    <div class="modal-header"><div><p class="eyebrow">ALMOST YOURS</p><h2 id="checkout-title">Checkout</h2></div><button class="close-button" data-modal-close aria-label="Close checkout">×</button></div>
+    <div id="checkout-view">
+      <div class="checkout-summary"><span>Order subtotal</span><strong id="checkout-subtotal">$0.00</strong></div>
+      <form id="checkout-form" data-testid="checkout-form">
+        <div class="form-grid">
+          <div class="form-field"><label for="customer-name">Full name</label><input id="customer-name" name="name" required minlength="2" autocomplete="name" data-testid="customer-name"></div>
+          <div class="form-field"><label for="customer-email">Email</label><input id="customer-email" name="email" type="email" required autocomplete="email" data-testid="customer-email"></div>
+          <div class="form-field full"><label for="customer-address">Delivery address</label><input id="customer-address" name="address" required minlength="5" autocomplete="street-address" data-testid="customer-address"></div>
+          <div class="form-field"><label for="customer-city">City</label><input id="customer-city" name="city" required autocomplete="address-level2" data-testid="customer-city"></div>
+          <div class="form-field"><label for="customer-zip">Postal code</label><input id="customer-zip" name="zip" required pattern="[A-Za-z0-9 -]{3,10}" autocomplete="postal-code" data-testid="customer-zip"></div>
+        </div>
+        <div class="demo-payment"><span>◇</span><div><b>Demo payment</b><small>No card details required. This store does not process payments.</small></div></div>
+        <label class="checkbox-row"><input type="checkbox" id="terms-check" required data-testid="terms-check"> I agree this is a demo order.</label>
+        <p class="form-error" id="checkout-error" role="alert"></p>
+        <button class="full-button" type="submit" data-testid="place-order">Place demo order <span>→</span></button>
+      </form>
+    </div>
+    <div id="order-success" class="order-success hidden" data-testid="order-success"><div class="success-icon">✓</div><p class="eyebrow">ORDER CONFIRMED</p><h2>Nice choice.</h2><p id="order-success-message"></p><button class="full-button" id="continue-after-order" type="button">Continue shopping</button></div>
+  </div>
+
+  <section class="qa-panel hidden" id="qa-panel" aria-label="QA test panel" data-testid="qa-panel">
+    <div class="qa-header"><div><p class="eyebrow">BUILT FOR PRACTICE</p><h2>QA test panel</h2></div><button class="close-button" id="close-qa" aria-label="Close QA panel">×</button></div>
+    <p class="qa-description">Run simple browser-side checks against core store behavior. Results are saved in this browser.</p>
+    <div class="qa-actions"><button id="run-tests" class="full-button" type="button" data-testid="run-tests">Run demo checks ▶</button><button id="clear-test-history" class="secondary-button" type="button" data-testid="clear-test-history">Clear history</button></div>
+    <div class="qa-stats"><div><small>Checks run</small><strong id="qa-total" data-testid="qa-total">0</strong></div><div><small>Passed</small><strong id="qa-passed">0</strong></div><div><small>Failed</small><strong id="qa-failed">0</strong></div></div>
+    <div class="qa-history" id="qa-history" data-testid="qa-history"><p class="muted">No checks run yet.</p></div>
+    <button id="reset-store" class="danger-button" type="button" data-testid="reset-store">Reset all demo data</button>
+    <p class="qa-footnote">Reset clears cart, wishlist, orders, and QA history from local storage.</p>
+  </section>
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

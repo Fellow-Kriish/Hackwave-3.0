@@ -39,6 +39,15 @@ function itemNames(record: StoreRecord): string[] | null {
   return record.items.map((item) => String((item as { name?: unknown } | null)?.name ?? ''));
 }
 
+/** Each item's quantity (1 when the app records none), or null when the record has no item list. */
+function itemUnits(record: StoreRecord): { name: string; qty: number }[] | null {
+  if (!Array.isArray(record.items)) return null;
+  return record.items.map((item) => {
+    const entry = item as { name?: unknown; qty?: unknown } | null;
+    return { name: String(entry?.name ?? ''), qty: typeof entry?.qty === 'number' && entry.qty > 0 ? entry.qty : 1 };
+  });
+}
+
 function sameMembers(a: string[], b: string[]): boolean {
   return a.length === b.length && [...a].sort().join('\u0000') === [...b].sort().join('\u0000');
 }
@@ -54,6 +63,23 @@ function compareRecord(record: StoreRecord, match: Oracle['state']['match']): Co
   }
   if (match.cardLast4 !== undefined) {
     compared.push({ field: 'cardLast4', expected: match.cardLast4, actual: record.cardLast4 ?? null, ok: record.cardLast4 === match.cardLast4 });
+  }
+  if (match.itemCount !== undefined) {
+    const units = itemUnits(record);
+    const actual = units === null ? null : units.reduce((sum, unit) => sum + unit.qty, 0);
+    compared.push({ field: 'itemCount', expected: match.itemCount, actual, ok: actual === match.itemCount });
+  }
+  if (match.prices !== undefined) {
+    // Whatever was bought, the total must be what the catalogue charges for it: catches a wrong price on any goal.
+    const units = itemUnits(record);
+    const prices = match.prices;
+    const unknown = units?.filter((unit) => prices[unit.name] === undefined).map((unit) => unit.name) ?? [];
+    if (units === null || unknown.length > 0) {
+      compared.push({ field: 'totalFromCatalog', expected: 'every item in the catalogue', actual: units === null ? 'no item list' : `not in the catalogue: ${unknown.join(', ')}`, ok: false });
+    } else {
+      const expected = units.reduce((sum, unit) => sum + (prices[unit.name] ?? 0) * unit.qty, 0);
+      compared.push({ field: 'totalFromCatalog', expected, actual: record.total ?? null, ok: record.total === expected });
+    }
   }
   return compared;
 }

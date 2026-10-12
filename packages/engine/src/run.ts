@@ -13,7 +13,7 @@ import {
   type RunRecord,
   type Verdict,
 } from '@hackwave/contracts';
-import { createVerifier, decideVerdict } from '@hackwave/verifier';
+import { createVerifier, decideVerdict, type Verifier } from '@hackwave/verifier';
 import { chromium } from 'playwright';
 import { sameOrigin } from './allowlist';
 import { loadConfig } from './config';
@@ -24,10 +24,11 @@ import { describeTier, LlmAdapter, loadPrompt, readManifest, resolveLlmSettings 
 import { loadIntent, loadPlan } from './load';
 import { LocatorCache } from './locator-cache';
 import { findRepoRoot } from './paths';
+import { loadProjects, projectFor } from './projects';
 import { cacheablePlan, loadCachedPlan, planCacheFile, savePlanCache } from './plan-cache';
 import { createPlanner, planPromptHash } from './planner';
 import { createExplainer, type Explanation } from './explain';
-import { printExploreBlock, renderExploreReport, type ExploreResult } from './explore';
+import { passedUnverified, printExploreBlock, renderExploreReport, type ExploreResult } from './explore';
 import { markdownToHtml } from './html';
 import { banner, printFinalBlock, renderReport, summary, whatChanged, type LocatorChange, type ReportContext } from './report';
 import { createReplanner } from './replanner';
@@ -61,6 +62,12 @@ export interface RunOptions {
   envOverride?: Record<string, string | undefined>;
   /** Every event as it happens (the web app streams them); the JSON line is on disk first. */
   onEvent?: (event: EngineEvent) => void;
+  /**
+   * When the target has no readable source of truth (no matching project, and nothing at /api/<store>), run anyway
+   * with no verifier, the result tagged unverified, instead of stopping with a setup error. Goals typed in plain words use it;
+   * `run` and the evals stay strict.
+   */
+  allowUnverified?: boolean;
 }
 
 /** A screenshot taken where the run changed course or failed, kept in the run folder for the report. */
@@ -147,6 +154,16 @@ export async function runIntent(options: RunOptions): Promise<RunResult> {
   return (await runCore(options, null)) as RunResult;
 }
 
+/**
+ * A run that falls back to UNVERIFIED when the site has no source of truth: a RunResult when the verifier ran, an
+ * ExploreResult (with unverifiedReason) when it could not.
+ */
+export async function runGoal(options: RunOptions): Promise<RunResult | ExploreResult> {
+  return runCore({ ...options, allowUnverified: true }, null);
+}
+
+export const isVerified = (result: RunResult | ExploreResult): result is RunResult => 'verdict' in result;
+
 export interface ExploreOptions extends Pick<RunOptions, 'target' | 'headed' | 'slowMo' | 'quiet' | 'envOverride' | 'onEvent'> {
   intent: Intent;
 }
@@ -159,8 +176,9 @@ export async function exploreGoal(options: ExploreOptions): Promise<ExploreResul
 async function runCore(options: RunOptions, explored: Intent | null): Promise<RunResult | ExploreResult> {
   const root = findRepoRoot();
   const config = loadConfig(root);
-  const explore = explored !== null;
   const intent = explored ?? asSetupError(() => loadIntent(resolve(options.intentFile)));
+  // projects/*.json: the app whose address matches the target brings its own system of record.
+  const projects = asSetupError(() => loadProjects(root));
   const goalHash = sha256(intent.goal);
 
   // The engine boundary: the executor and planner get goal + input keys (values by key only for filling); only the verifier gets the oracle.
@@ -231,6 +249,30 @@ async function runCore(options: RunOptions, explored: Intent | null): Promise<Ru
     events.emit('plan_mismatch', { message: `plan ${planLabel} was written for ${plan.intentId}, not ${intent.id}; its input keys fit, so it runs` });
   }
 
+  // The verifier for this target: the matching project's store, or <origin>/api/<store> when no project claims it.
+  // Explore mode has no source of truth to read; a typed goal on a site without one falls back to the same, quietly.
+  const project = explored ? null : projectFor(projects, origin);
+  let verifier: Verifier | null = explored
+    ? null
+    : createVerifier(intent, { origin, evidenceDir: join(runDir, 'evidence'), defaultPollMs: config.verifier.pollMs, stores: project?.stores });
+  let unverifiedReason: string | null = explored ? 'explore mode: no source of truth is read' : null;
+  // A store kept in the browser (browser-storage) is read once the page is open, below; every other store now.
+  if (verifier && !verifier.needsPage) {
+    try {
+      const baseline = await verifier.baseline();
+      events.emit('verifier_baseline', { count: baseline.count, maxId: baseline.maxId, project: project?.id ?? null });
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      if (!options.allowUnverified) throw new SetupError(`cannot read the store before the run: ${why}`);
+      verifier = null;
+      unverifiedReason = project
+        ? `the ${project.name} store could not be read (${why})`
+        : `no project in projects/ matches ${origin}, and it has no readable /api/${intent.oracle.state.store} (${why})`;
+      events.emit('verifier_unavailable', { reason: unverifiedReason });
+    }
+  }
+  const explore = verifier === null;
+
   const llm = new LlmAdapter({
     settings,
     config,
@@ -264,17 +306,6 @@ async function runCore(options: RunOptions, explored: Intent | null): Promise<Ru
     fullTreeBelowScore: config.ladder.fullTreeBelowScore,
   });
 
-  // Explore mode has no source of truth to read, so no verifier at all: the result can only be UNVERIFIED.
-  const verifier = explore ? null : createVerifier(intent, { origin, evidenceDir: join(runDir, 'evidence'), defaultPollMs: config.verifier.pollMs });
-  if (verifier) {
-    let baseline;
-    try {
-      baseline = await verifier.baseline();
-    } catch (error) {
-      throw new SetupError(`cannot read the store before the run: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    events.emit('verifier_baseline', { count: baseline.count, maxId: baseline.maxId });
-  }
 
   const browser = await chromium.launch({ headless: !options.headed, slowMo: options.slowMo ?? 0 });
   try {
@@ -303,6 +334,18 @@ async function runCore(options: RunOptions, explored: Intent | null): Promise<Ru
       events.emit('dialog_dismissed', { dialogType: dialog.type() });
       void dialog.dismiss().catch(() => undefined);
     });
+
+    // A store kept in the browser is read through this page: open the app once and take the baseline before step 1.
+    // The browser is new for every run, so its storage starts as the app leaves it on first load.
+    if (verifier?.needsPage) {
+      try {
+        await page.goto(targetUrl.toString(), { waitUntil: 'load', timeout: budgets.stepMs });
+        const baseline = await verifier.baseline(page);
+        events.emit('verifier_baseline', { count: baseline.count, maxId: baseline.maxId, project: project?.id ?? null });
+      } catch (error) {
+        throw new SetupError(`cannot read the store before the run: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
 
     // The screen at every change or failure: a control found another way, a section re-planned, a step not found, a stop.
     const shots: RunShot[] = [];
@@ -428,11 +471,12 @@ async function runCore(options: RunOptions, explored: Intent | null): Promise<Ru
         llmCalls: record.llmCalls.total,
         screenshot,
         shots: await takenShots(),
+        unverifiedReason,
       };
       writeJson('run-record.json', record);
       const markdown = renderExploreReport(intent.goal, targetUrl.toString(), executedPlan, result);
       writeFileSync(join(runDir, 'report.md'), markdown);
-      writeFileSync(join(runDir, 'report.html'), markdownToHtml(markdown, `UNVERIFIED · ${intent.id}`));
+      writeFileSync(join(runDir, 'report.html'), markdownToHtml(markdown, `${passedUnverified(result) ? 'Passed' : 'Did not finish'} (unverified) · ${intent.id}`));
       if (!options.quiet) printExploreBlock(result);
       return result;
     }

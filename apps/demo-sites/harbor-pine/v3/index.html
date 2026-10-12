@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Harbor & Pine Hotel V2 demo booking site for software testing.">
+  <title>Harbor & Pine — Hotel Booking V2</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <div class="topline"><span>YOUR NEXT STAY, THOUGHTFULLY CONSIDERED</span><span>DEMO BOOKING SITE · NO REAL CHARGES</span></div>
+  <header class="header">
+    <a class="brand" href="#" data-testid="brand-home" aria-label="Harbor and Pine home"><span class="brand-icon">H<span>+</span></span><span>HARBOR <i>&</i> PINE<small>HOTEL COLLECTION</small></span></a>
+    <nav class="main-nav" aria-label="Main navigation"><a href="#rooms">Rooms & suites</a><a href="#experience">The experience</a><a href="#location">Location</a></nav>
+    <button id="open-booking" class="header-book" data-testid="header-book" type="button">Book your stay <span>↗</span></button>
+    <button class="mobile-menu" id="mobile-menu" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-image" role="img" aria-label="Stylish coastal hotel room with warm natural materials">
+        <div class="hero-image-overlay"></div>
+        <div class="hero-caption"><span class="caption-line"></span><span>THE ART OF SLOWING DOWN</span></div>
+      </div>
+      <div class="hero-copy">
+        <p class="eyebrow">A BOUTIQUE ESCAPE · COASTAL LIVING</p>
+        <h1>Stay a little<br><em>closer to calm.</em></h1>
+        <p>Considered rooms, thoughtful details, and space to breathe. Find your own pace at Harbor & Pine.</p>
+        <a class="dark-button" href="#rooms" data-testid="explore-rooms">Explore our rooms <span>→</span></a>
+        <div class="hero-meta"><span class="stars">★★★★★</span><span>Guest-loved comfort</span><span class="meta-divider"></span><span>Harbor District</span></div>
+      </div>
+      <div class="hero-stamp"><span>TAKE</span><span>THE</span><strong>SCENIC</strong><span>ROUTE</span><i>✳</i></div>
+    </section>
+
+    <section class="booking-wrap" id="booking">
+      <form class="booking-bar" id="search-form" data-testid="search-form">
+        <div class="booking-field"><label for="check-in">CHECK IN</label><input type="date" id="check-in" name="checkIn" required data-testid="check-in"></div>
+        <div class="booking-field"><label for="check-out">CHECK OUT</label><input type="date" id="check-out" name="checkOut" required data-testid="check-out"></div>
+        <div class="booking-field"><label for="guest-count">GUESTS</label><select id="guest-count" name="guests" data-testid="guest-count"><option value="1">1 guest</option><option value="2" selected>2 guests</option><option value="3">3 guests</option><option value="4">4 guests</option><option value="5">5 guests</option><option value="6">6 guests</option></select></div>
+        <button class="search-button" type="submit" data-testid="search-availability">Find a room <span>↗</span></button>
+      </form>
+      <p class="booking-feedback" id="booking-feedback" role="status" aria-live="polite">Choose your dates to explore demo room availability.</p>
+    </section>
+
+    <section class="intro section-pad" id="experience">
+      <div><p class="eyebrow">MORE THAN A PLACE TO SLEEP</p><h2>A stay that feels<br><em>like a deep breath.</em></h2></div>
+      <div class="intro-copy"><p>Morning light, materials with a story, and a team that knows the little things make a difference. Harbor & Pine is your easygoing home base for exploring the coast.</p><a class="under-link" href="#location">A little about our neighborhood <span>↗</span></a></div>
+    </section>
+
+    <section class="rooms-section section-pad" id="rooms">
+      <div class="section-heading"><div><p class="eyebrow">MAKE YOURSELF AT HOME</p><h2>Rooms for your kind of getaway</h2><p>Find a space that fits your plans, from a spontaneous weekend to a longer escape.</p></div><div class="room-controls"><label for="room-filter" class="sr-only">Filter room type</label><select id="room-filter" data-testid="room-filter"><option value="all">All room types</option><option value="Room">Rooms</option><option value="Suite">Suites</option></select><label for="room-sort" class="sr-only">Sort rooms</label><select id="room-sort" data-testid="room-sort"><option value="featured">Featured</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option><option value="capacity">Guest capacity</option></select></div></div>
+      <div class="room-grid" id="room-grid" data-testid="room-grid"></div>
+      <div class="no-rooms hidden" id="no-rooms" data-testid="no-rooms"><h3>No rooms match those filters.</h3><button id="reset-room-filters" class="outline-button">Show all rooms</button></div>
+    </section>
+
+    <section class="experience-band">
+      <div class="experience-photo" role="img" aria-label="Sunlit hotel lounge with plants and natural textures"></div>
+      <div class="experience-copy"><p class="eyebrow">THE LITTLE EXTRAS</p><h2>Room to enjoy<br><em>the in-between.</em></h2><p>Settle in with a slow breakfast, a quiet corner to read, or a sunset stroll along the water. The best parts of a trip aren't always on the itinerary.</p><ul><li><span>✳</span> Seasonal breakfast options</li><li><span>✳</span> Complimentary Wi-Fi</li><li><span>✳</span> Local tips from our team</li></ul></div>
+    </section>
+
+    <section class="location section-pad" id="location"><div><p class="eyebrow">A GOOD PLACE TO BEGIN</p><h2>Close to the coast.<br><em>Far from the rush.</em></h2><p>Set in the fictional Harbor District, a short stroll from independent cafés, the waterfront path, and local galleries.</p><a class="under-link" href="#booking">Plan your visit <span>↗</span></a></div><div class="map-card" aria-label="Illustrated map of the fictional Harbor District"><div class="map-water"></div><div class="map-road road-one"></div><div class="map-road road-two"></div><div class="map-road road-three"></div><div class="map-park"></div><div class="map-pin">H<span>+</span></div><span class="map-label label-hotel">HARBOR & PINE</span><span class="map-label label-water">THE WATERFRONT</span><span class="map-label label-cafe">LITTLE OAK CAFÉ</span></div></section>
+
+    <section class="review-strip"><p class="eyebrow">KIND WORDS, IMAGINED GUESTS</p><div class="review-stars">★★★★★</div><blockquote>“The sort of place that makes you want to extend your stay by one more night.”</blockquote><span>— SAMPLE GUEST REVIEW · DEMO CONTENT</span></section>
+  </main>
+
+  <footer class="footer"><a class="brand footer-brand" href="#"><span class="brand-icon">H<span>+</span></span><span>HARBOR <i>&</i> PINE<small>HOTEL COLLECTION</small></span></a><p>A fictional hotel website built for software testing practice.</p><div><a href="#rooms">Rooms</a><a href="#experience">Experience</a><a href="#location">Location</a><button id="open-qa" type="button">QA test panel</button></div></footer>
+
+  <div class="overlay hidden" id="overlay" data-testid="overlay"></div>
+  <aside class="booking-drawer hidden" id="booking-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" data-testid="booking-drawer">
+    <div class="drawer-head"><div><p class="eyebrow">YOUR COASTAL ESCAPE</p><h2 id="drawer-title">Find your stay</h2></div><button class="close-button" data-close-booking aria-label="Close booking panel">×</button></div>
+    <div class="drawer-body">
+      <form id="drawer-search-form" class="drawer-search-form" data-testid="drawer-search-form">
+        <div class="booking-field"><label for="drawer-check-in">CHECK IN</label><input type="date" id="drawer-check-in" required data-testid="drawer-check-in"></div>
+        <div class="booking-field"><label for="drawer-check-out">CHECK OUT</label><input type="date" id="drawer-check-out" required data-testid="drawer-check-out"></div>
+        <div class="booking-field"><label for="drawer-guests">GUESTS</label><select id="drawer-guests" data-testid="drawer-guests"><option value="1">1 guest</option><option value="2" selected>2 guests</option><option value="3">3 guests</option><option value="4">4 guests</option><option value="5">5 guests</option><option value="6">6 guests</option></select></div>
+        <button class="dark-button full" type="submit" data-testid="drawer-search">Check demo availability <span>→</span></button>
+      </form>
+      <div id="drawer-results" class="drawer-results" data-testid="drawer-results"><p class="drawer-hint">Enter your dates to see estimated room totals.</p></div>
+    </div>
+    <div class="drawer-foot"><p>Demo only: availability is illustrative, not live inventory.</p></div>
+  </aside>
+
+  <div class="modal hidden" id="guest-modal" role="dialog" aria-modal="true" aria-labelledby="guest-modal-title" data-testid="guest-modal">
+    <div class="modal-head"><div><p class="eyebrow">ONE STEP CLOSER</p><h2 id="guest-modal-title">Your guest details</h2></div><button class="close-button" data-close-modal aria-label="Close guest form">×</button></div>
+    <div id="guest-form-view"><div class="selected-room" id="selected-room"></div><form id="guest-form" data-testid="guest-form"><input type="hidden" id="selected-room-id" name="roomId"><div class="form-grid"><div class="form-field"><label for="guest-name">Full name</label><input id="guest-name" name="name" required minlength="2" autocomplete="name" data-testid="guest-name"></div><div class="form-field"><label for="guest-email">Email address</label><input id="guest-email" name="email" type="email" required autocomplete="email" data-testid="guest-email"></div><div class="form-field full"><label for="guest-phone">Phone number (optional)</label><input id="guest-phone" name="phone" type="tel" autocomplete="tel" data-testid="guest-phone"></div><div class="form-field full"><label for="guest-requests">Special requests (optional)</label><textarea id="guest-requests" name="requests" rows="3" maxlength="300" placeholder="Anything you'd like us to know?" data-testid="guest-requests"></textarea></div></div><div class="demo-notice"><span>ⓘ</span><p>This is a demo reservation. No payment is collected and no real room is booked.</p></div><p class="form-error" id="guest-error" role="alert"></p><button class="dark-button full" type="submit" data-testid="confirm-booking">Confirm demo booking <span>→</span></button></form></div>
+    <div id="booking-success" class="booking-success hidden" data-testid="booking-success"><div class="success-mark">✓</div><p class="eyebrow">RESERVATION CONFIRMED</p><h2>Consider it a getaway.</h2><p id="booking-success-message"></p><button id="success-done" class="dark-button full" type="button">Lovely, thank you</button></div>
+  </div>
+
+  <section class="qa-panel hidden" id="qa-panel" aria-label="QA test panel" data-testid="qa-panel">
+    <div class="qa-head"><div><p class="eyebrow">PRACTICE MAKES PROGRESS</p><h2>QA test panel</h2></div><button class="close-button" id="close-qa" aria-label="Close QA panel">×</button></div>
+    <p class="qa-intro">Run simple browser-side checks and review saved results. All bookings are simulated.</p>
+    <div class="qa-actions"><button id="run-tests" class="dark-button" data-testid="run-tests" type="button">Run demo checks ▶</button><button id="clear-history" class="outline-button" data-testid="clear-history" type="button">Clear history</button></div>
+    <div class="qa-stats"><div><small>Checks run</small><strong id="qa-total">0</strong></div><div><small>Passed</small><strong id="qa-passed">0</strong></div><div><small>Failed</small><strong id="qa-failed">0</strong></div></div>
+    <div id="qa-history" class="qa-history" data-testid="qa-history"><p>No checks run yet.</p></div>
+    <button id="reset-data" class="reset-button" data-testid="reset-data" type="button">Reset all demo data</button><p class="qa-note">Clears saved demo reservations and QA history from this browser.</p>
+  </section>
+  <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

@@ -1,0 +1,291 @@
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  font-family: Arial, Helvetica, sans-serif;
+  color: #203047;
+  background: #f4f7f8;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 7%;
+  background: white;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.logo {
+  color: #0f766e;
+  font-size: 26px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+nav {
+  display: flex;
+  gap: 22px;
+}
+
+nav a {
+  color: #334155;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.container {
+  width: min(1080px, 92%);
+  margin: 28px auto;
+}
+
+.hero {
+  padding: 42px 30px;
+  border-radius: 16px;
+  background: #dff5ef;
+}
+
+.eyebrow {
+  color: #0f766e;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+
+.hero h1 {
+  max-width: 600px;
+  font-size: clamp(30px, 5vw, 46px);
+  line-height: 1.15;
+  margin: 12px 0;
+}
+
+.hero p {
+  color: #475569;
+}
+
+.panel,
+.section {
+  margin-top: 25px;
+  padding: 25px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+.search-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 0.8fr;
+  gap: 15px;
+}
+
+label {
+  display: block;
+  font-weight: 600;
+  margin: 12px 0 6px;
+  font-size: 14px;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  font: inherit;
+  background: white;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid #99f6e4;
+  border-color: #0f766e;
+}
+
+.button {
+  border: 0;
+  border-radius: 7px;
+  padding: 12px 17px;
+  margin-top: 17px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary {
+  background: #0f766e;
+  color: white;
+}
+
+.primary:hover {
+  background: #115e59;
+}
+
+.button:focus-visible {
+  outline: 3px solid #5eead4;
+  outline-offset: 3px;
+}
+
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.section-heading p,
+.muted {
+  color: #64748b;
+}
+
+.hotel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.hotel-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+.hotel-art {
+  height: 125px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #e6f4f1;
+  font-size: 52px;
+}
+
+.hotel-card h3 {
+  margin: 14px 0 4px;
+}
+
+.hotel-location {
+  color: #64748b;
+  font-size: 14px;
+  margin: 0;
+}
+
+.rating {
+  color: #a16207;
+  font-weight: bold;
+  margin: 12px 0;
+}
+
+.hotel-price {
+  font-size: 20px;
+  font-weight: 800;
+  margin-top: auto;
+}
+
+.hotel-price small {
+  font-size: 13px;
+  font-weight: normal;
+  color: #64748b;
+}
+
+.message {
+  color: #475569;
+}
+
+.message.error {
+  color: #b91c1c;
+}
+
+.booking-summary {
+  background: #f0fdfa;
+  border-radius: 9px;
+  padding: 16px;
+  margin-bottom: 18px;
+}
+
+.booking-summary p {
+  margin: 6px 0;
+}
+
+.confirmation {
+  margin-top: 20px;
+  padding: 18px;
+  background: #dcfce7;
+  color: #166534;
+  border-radius: 9px;
+  overflow-wrap: anywhere;
+}
+
+.confirmation.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.testing-note {
+  background: #f8fafc;
+}
+
+#app-status {
+  font-weight: 600;
+  color: #0f766e;
+}
+
+footer {
+  padding: 22px;
+  text-align: center;
+  color: #64748b;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 800px) {
+  .search-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hotel-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .header {
+    padding: 16px 5%;
+  }
+
+  nav {
+    gap: 12px;
+    font-size: 14px;
+  }
+
+  .hero {
+    padding: 30px 20px;
+  }
+
+  .panel,
+  .section {
+    padding: 18px;
+  }
+
+  .search-grid,
+  .hotel-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
