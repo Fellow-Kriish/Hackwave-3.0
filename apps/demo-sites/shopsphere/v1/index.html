@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="ShopSphere V1 demo e-commerce storefront for software testing.">
+  <title>ShopSphere | Demo Store</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <header class="header">
+    <a href="#" class="logo" data-testid="store-logo">ShopSphere</a>
+    <nav>
+      <a href="#products">Products</a>
+      <a href="#cart">Cart (<span id="cart-count" data-testid="cart-count">0</span>)</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <p class="eyebrow">SIMPLE ONLINE SHOPPING</p>
+      <h1>Find your everyday essentials.</h1>
+      <p>Browse products, add to your cart, and try a demo checkout.</p>
+      <a class="hero-link" href="#products">Explore products ↓</a>
+    </section>
+
+    <section id="products" class="section">
+      <div class="section-heading">
+        <div>
+          <h2>Our Products</h2>
+          <p>Choose something you like.</p>
+        </div>
+        <input id="product-search" data-testid="product-search" type="search"
+          placeholder="Search products..." aria-label="Search products">
+      </div>
+
+      <p id="search-status" role="status" aria-live="polite"></p>
+      <div id="product-list" class="product-grid" data-testid="product-list"></div>
+    </section>
+
+    <section id="cart" class="section">
+      <h2>Your Shopping Cart</h2>
+      <p class="muted">Review your items before checkout.</p>
+
+      <div id="cart-items" data-testid="cart-items">
+        <p class="empty-message">Your cart is empty.</p>
+      </div>
+
+      <div class="cart-summary">
+        <p>Subtotal <strong id="cart-subtotal" data-testid="cart-subtotal">$0.00</strong></p>
+        <p>Shipping <strong id="shipping-cost">Free</strong></p>
+        <p class="total">Total <strong id="cart-total" data-testid="cart-total">$0.00</strong></p>
+      </div>
+
+      <button id="clear-cart" class="button secondary" data-testid="clear-cart" type="button">Clear Cart</button>
+    </section>
+
+    <section id="checkout" class="section checkout">
+      <h2>Checkout</h2>
+      <p class="muted">No real payment or order processing takes place.</p>
+
+      <form id="checkout-form" data-testid="checkout-form">
+        <label for="customer-name">Full Name</label>
+        <input id="customer-name" data-testid="customer-name" name="name" type="text"
+          required minlength="2" placeholder="Enter your full name">
+
+        <label for="customer-email">Email Address</label>
+        <input id="customer-email" data-testid="customer-email" name="email" type="email"
+          required placeholder="you@example.com">
+
+        <label for="customer-address">Delivery Address</label>
+        <textarea id="customer-address" data-testid="customer-address" name="address"
+          required minlength="5" placeholder="Enter your delivery address"></textarea>
+
+        <button class="button primary" type="submit" data-testid="place-order">Place Order</button>
+      </form>
+
+      <div id="order-result" class="order-result" data-testid="order-result" role="status"
+        aria-live="polite" hidden></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>ShopSphere © 2026 · Demo store for software testing</p>
+  </footer>
+</body>
+</html>

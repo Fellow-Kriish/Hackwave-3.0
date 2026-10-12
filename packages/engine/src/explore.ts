@@ -1,10 +1,11 @@
 import { IntentSchema, type HealerDone, type Inputs, type Intent, type Plan, type Reason, type RunOutcome } from '@hackwave/contracts';
-import { bold, dim, yellow } from './console';
+import { bold, dim, green, yellow } from './console';
 import { idFromGoal } from './init';
 
 /**
- * Explore mode: the engine plans, acts and heals on any site, but nothing checks the outcome against the app's data,
- * so the result is UNVERIFIED, never a pass. It is a walkthrough of a goal, not a test.
+ * Explore mode, and typed goals on sites with no readable data: the engine plans, acts and heals as usual, but no
+ * verifier reads the app's data. A run that completes and believes it reached the goal passes, quietly tagged
+ * "unverified": the result rests on the page alone. It is never GREEN, which stays for checked-against-data passes.
  */
 export interface ExploreResult {
   runDir: string;
@@ -20,6 +21,8 @@ export interface ExploreResult {
   screenshot: string | null;
   /** Screens at every change or failure (RunShot in run.ts). */
   shots: { file: string; kind: string; stepKey: string | null; caption: string }[];
+  /** Why nothing was verified: explore mode, or a site with no readable source of truth. */
+  unverifiedReason: string | null;
 }
 
 /** Explore runs get more time: real sites are slower than the demo shop and never stop loading ads and beacons. */
@@ -54,6 +57,9 @@ export function parseInputs(pairs: readonly string[]): Inputs {
   return inputs;
 }
 
+/** Passed (unverified) when every step ran and the engine believes the goal was reached. */
+export const passedUnverified = (result: Pick<ExploreResult, 'outcome' | 'healerBelievedDone'>) => result.outcome === 'completed' && result.healerBelievedDone.believed;
+
 export function outcomeLine(result: Pick<ExploreResult, 'outcome' | 'reason' | 'healerBelievedDone'>): string {
   const done = result.healerBelievedDone;
   if (result.outcome === 'completed' && done.believed) return `every step ran; the engine believes the goal was reached at step ${done.atStep} (${done.stepKey})`;
@@ -63,9 +69,7 @@ export function outcomeLine(result: Pick<ExploreResult, 'outcome' | 'reason' | '
 
 export function renderExploreReport(goal: string, target: string, plan: Plan | null, result: ExploreResult): string {
   const lines = [
-    `# UNVERIFIED · explore mode`,
-    '',
-    `> Explore mode carries out a goal on any site, but nothing checks the outcome against the app's data. This is a walkthrough, not a test: it is never a pass.`,
+    passedUnverified(result) ? '# Passed (unverified)' : '# Did not finish (unverified)',
     '',
     `- **Goal:** ${goal}`,
     `- **Site:** ${target}`,
@@ -89,17 +93,20 @@ export function renderExploreReport(goal: string, target: string, plan: Plan | n
     for (const shot of result.shots) lines.push(`- ${shot.caption}`, '', `  ![${shot.caption}](${shot.file})`);
   }
   if (result.screenshot) lines.push('', '## Final screen', '', `![final screen](${result.screenshot})`);
-  lines.push('', '## What would make this a real test', '', "A success check that code can verify: the app's data (an API or a read-only database), or a page fact such as the cart count or the address. Explore mode has neither, so it cannot say pass or fail.");
+  lines.push(
+    '',
+    `Unverified: ${result.unverifiedReason ?? 'no source of truth was read'}. The result rests on what the page showed; add a project in projects/ to check it against the app's data.`,
+  );
   return `${lines.join('\n')}\n`;
 }
 
 export function printExploreBlock(result: ExploreResult): void {
   console.log('');
-  console.log(yellow(bold('━━ UNVERIFIED · explore mode ━━')));
+  console.log(passedUnverified(result) ? `${green(bold('━━ PASSED ━━'))} ${dim('(unverified)')}` : `${yellow(bold('━━ DID NOT FINISH ━━'))} ${dim('(unverified)')}`);
   console.log(`  ${outcomeLine(result)}`);
   console.log(`  final page: ${result.finalTitle || '(no title)'}${result.finalHeading ? ` · "${result.finalHeading}"` : ''}`);
   console.log(`  address: ${result.finalUrl}`);
   console.log(`  ${result.actions} action(s) · ${result.llmCalls} AI call(s) · ${result.shots.length} screenshot(s) at changes or failures`);
-  console.log(dim("  nothing was checked against the app's data: a walkthrough, not a test, and never a pass"));
+  console.log(dim(`  unverified: ${result.unverifiedReason ?? 'no source of truth was read'}`));
   console.log(`  report: ${result.runDir}\\report.md (and report.html${result.screenshot ? `, ${result.screenshot}` : ''})`);
 }

@@ -1,0 +1,35 @@
+{
+  "id": "shopsphere",
+  "name": "ShopSphere demo store",
+  "match": [
+    "http://localhost:5181", "http://localhost:5182", "http://localhost:5183",
+    "http://127.0.0.1:5181", "http://127.0.0.1:5182", "http://127.0.0.1:5183"
+  ],
+  "stores": {
+    "orders": {
+      "kind": "browser-storage",
+      "key": "shopsphere-data",
+      "recordsPath": "orders",
+      "fields": { "id": "orderNumber", "items": "items[].name", "quantity": "items[].qty", "total": "total" }
+    }
+  },
+  "catalog": {
+    "items": [
+      { "name": "Studio Table Lamp", "price": 68 },
+      { "name": "Everyday Ceramic Mug", "price": 24 },
+      { "name": "Cloud Wireless Headphones", "price": 89 },
+      { "name": "Botanical Hand Wash", "price": 19 },
+      { "name": "Weekend Carryall", "price": 54 },
+      { "name": "Pocket Bluetooth Speaker", "price": 46 },
+      { "name": "Little Leaf Planter", "price": 32 },
+      { "name": "Minimal Everyday Watch", "price": 112 },
+      { "name": "Linen Notes Journal", "price": 18 },
+      { "name": "Evening Ritual Candle", "price": 27 },
+      { "name": "Desk Companion Speaker", "price": 74 },
+      { "name": "Soft Shape Planter", "price": 39 }
+    ]
+  },
+  "inputs": {
+    "customer": { "name": "Kartik Test", "email": "kartik@example.com", "address": "12 MG Road", "city": "Indore", "zip": "452001" }
+  }
+}

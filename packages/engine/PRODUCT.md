@@ -38,7 +38,7 @@ Healing is a one-time cost: once a plan and locators are cached, a re-run makes 
   backend bug, Version B with a pricing bug, served at one address and redeployed between steps.
 - Results: GREEN (passed), AMBER (passed after healing, with the fix to commit and a plain-English "What changed"), RED
   (a real bug, or no safe way forward), GREY (no verdict: the environment failed). Explore mode on any other website
-  reports UNVERIFIED and is never a pass.
+  passes quietly tagged "unverified" when it completes, never GREEN.
 - Every run writes a folder under `runs/` with events, the verdict, `report.md` / `report.html` and `pr.md`.
 
 ## Capabilities and Constraints
@@ -53,8 +53,9 @@ Healing is a one-time cost: once a plan and locators are cached, a re-run makes 
 - `apps/shop` is the app under test, not the product: its labels, landmarks and layout are what cached locators,
   recorded AI answers and eval fixtures depend on, so product UI work must not restyle it.
 - A UI change must not change any AI cache key (`prompts/`, `runs/llm-cache`): the recorded demo replays offline.
-- Known limits: the verifier reads only `/api/<store>` on the same origin with the shop's record shape; typed goals get
-  a success check built by code for one product; other websites need explore mode (UNVERIFIED).
+- Known limits: the verifier reads the source of truth each project file names (`projects/*.json`): an HTTP API, or
+  for apps with no server the browser's storage (ShopSphere and Harbor & Pine, `apps/demo-sites`); an address no project
+  claims needs explore mode (unverified). It assumes no one else creates records during a test.
 - AI: Groq `openai/gpt-oss-120b` for both tiers, free tier with an 8k tokens/minute and 200k tokens/day limit.
 
 ## Brand Commitments
@@ -77,7 +78,8 @@ Healing is a one-time cost: once a plan and locators are cached, a re-run makes 
 
 ## Product Principles
 
-1. Never call it a pass unless code checked the outcome. Anything weaker is labelled (AMBER, UNVERIFIED), never GREEN.
+1. GREEN only when code checked the outcome against the app's data. A run on a site with no readable data may pass,
+   quietly tagged "unverified" (user decision, 2026-10-11), and is never GREEN.
 2. Show why, not just what: every verdict carries its reason, what the healer believed versus what the verifier found,
    and for AMBER what changed in the app.
 3. The judge must follow it live: each step, heal and check is visible as it happens, in the browser and the log.

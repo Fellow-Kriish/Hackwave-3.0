@@ -39,7 +39,7 @@ describe('explore mode', () => {
     expect(() => parseInputs(['no-equals'])).toThrow(/key=value/);
   });
 
-  it('reports UNVERIFIED, never a pass, with its screenshots', () => {
+  it('passes quietly, tagged unverified, never GREEN, with its screenshots', () => {
     const result: ExploreResult = {
       runDir: 'runs/x',
       outcome: 'completed',
@@ -52,12 +52,14 @@ describe('explore mode', () => {
       finalHeading: 'Added to cart',
       llmCalls: 4,
       screenshot: 'final.png',
+      unverifiedReason: null,
       shots: [{ file: 'shots/01-add-to-cart.add.png', kind: 'healed', stepKey: 'add-to-cart.add', caption: 'Found button "Add to Cart" instead of button "Add to basket" (rung 3)' }],
     };
     const report = renderExploreReport('add one item to cart', 'https://shop.example/', null, result);
-    expect(report.startsWith('# UNVERIFIED · explore mode')).toBe(true);
-    expect(report).toContain('it is never a pass');
+    expect(report.startsWith('# Passed (unverified)')).toBe(true);
+    expect(report).toContain('Unverified: no source of truth was read.');
+    expect(renderExploreReport('x goal here', 'https://shop.example/', null, { ...result, outcome: 'unresolvable' }).startsWith('# Did not finish')).toBe(true);
     expect(report).toContain('![Found button "Add to Cart" instead of button "Add to basket" (rung 3)](shots/01-add-to-cart.add.png)');
-    expect(report).not.toMatch(/GREEN|PASSED/);
+    expect(report).not.toMatch(/GREEN|UNVERIFIED/);
   });
 });

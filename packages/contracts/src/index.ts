@@ -5,6 +5,7 @@ import { PlanSchema, type Plan } from './plan';
 
 export * from './intent';
 export * from './plan';
+export * from './project';
 export * from './records';
 export * from './redact';
 export * from './run';

@@ -1,19 +1,21 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { basename, extname, isAbsolute, join, normalize, relative, resolve } from 'node:path';
 import type { Intent } from '@hackwave/contracts';
 import { describeEvent } from '../console';
 import type { EngineEvent } from '../events';
-import { exploreIntent, outcomeLine } from '../explore';
+import { exploreIntent, outcomeLine, type ExploreResult } from '../explore';
 import { lintIntentText } from '../intent-lint';
 import { locatorCacheFile } from '../locator-cache';
 import { findRepoRoot } from '../paths';
 import { planCacheFile } from '../plan-cache';
 import { healerLine } from '../report';
-import { exploreGoal, runIntent, SetupError } from '../run';
+import { loadProjects, projectFor } from '../projects';
+import { exploreGoal, isVerified, runGoal, runIntent, SetupError, type RunResult } from '../run';
 import { freePort, resetStore, startPrivateShop, type PrivateShop } from '../shop-process';
 import { fetchCatalog, typedIntent } from '../typed-goal';
 import { renderPage } from './page';
+import { SITES, serveSite } from '../../../../apps/demo-sites/serve.mjs';
 
 export type Version = 'v1' | 'v2' | 'v2-broken' | 'v2-wrong-total';
 
@@ -28,6 +30,35 @@ export const VERSION_INFO: Record<Version, { code: string; name: string; detail:
 export const VERSIONS: Record<Version, string> = Object.fromEntries(
   Object.entries(VERSION_INFO).map(([version, info]) => [version, `Version ${info.code}: ${info.name.toLowerCase()}`]),
 ) as Record<Version, string>;
+
+export type SiteId = 'shopsphere' | 'harbor-pine';
+export type SiteVersion = 'v1' | 'v2' | 'v3';
+
+/** The demo sites (apps/demo-sites) as projects: their versions, and the goal each opens with. */
+export const SITE_PROJECTS: Record<SiteId, { name: string; detail: string; defaultGoal: string; examples: string[]; versions: Record<SiteVersion, { code: string; name: string; detail: string }> }> = {
+  shopsphere: {
+    name: 'ShopSphere store',
+    detail: 'Checked against its browser storage',
+    defaultGoal: 'Buy the Cloud Wireless Headphones',
+    examples: ['Buy the Studio Table Lamp', 'Buy 2 Everyday Ceramic Mugs'],
+    versions: {
+      v1: { code: 'V1', name: 'The original store', detail: 'One page: products, cart and checkout' },
+      v2: { code: 'V2', name: 'The redesign', detail: 'Cart drawer, checkout dialog, city, postal code and consent' },
+      v3: { code: 'V3', name: 'Redesign with a storage bug', detail: 'Confirms the order, saves nothing' },
+    },
+  },
+  'harbor-pine': {
+    name: 'Harbor & Pine hotel',
+    detail: 'Checked against its browser storage',
+    defaultGoal: 'Book the Harbor Suite',
+    examples: ['Book the Coastal King', 'Book the Garden Twin'],
+    versions: {
+      v1: { code: 'V1', name: 'The original booking page', detail: 'One page: dates, rooms and the guest form' },
+      v2: { code: 'V2', name: 'The redesign', detail: 'New look, room cards and a booking dialog' },
+      v3: { code: 'V3', name: 'Redesign with a storage bug', detail: 'Confirms the reservation, saves nothing' },
+    },
+  },
+};
 
 /** The guided demo preset: one sentence, four runs, one address. */
 export const GUIDED_STEPS: readonly { version: Version; fresh: boolean; title: string; say: string }[] = [
@@ -94,7 +125,8 @@ export interface UiServer {
 
 /** One planned run of a batch: a shop version, or the website. */
 interface PlannedRun {
-  version: Version | null;
+  /** A demo shop version, a demo site version, or null for a website. */
+  version: string | null;
   code: string;
   name: string;
   fresh: boolean;
@@ -103,6 +135,7 @@ interface PlannedRun {
 /** A test as the tester started it: one goal on one or more versions of the shop, or on one website. */
 export type BatchRequest =
   | { project: 'shop'; goal: string; runs: PlannedRun[]; live: boolean; guided: boolean }
+  | { project: SiteId; goal: string; runs: PlannedRun[]; live: true; guided: false }
   | { project: 'website'; goal: string; url: string; query: string | null; runs: PlannedRun[]; live: true; guided: false };
 
 /** Parses a POST body into a batch, or says what is wrong with it. `version` (one) is still accepted. */
@@ -121,6 +154,19 @@ export function parseBatch(body: Record<string, unknown>, guided: boolean): Batc
     return { project: 'website', goal, url: url.toString(), query, live: true, guided: false, runs: [{ version: null, code: 'W', name: url.host, fresh: body.fresh === true }] };
   }
   const fresh = body.fresh === true;
+  if (body.project === 'shopsphere' || body.project === 'harbor-pine') {
+    const site = SITE_PROJECTS[body.project];
+    const asked = Array.isArray(body.versions) ? body.versions : [];
+    if (asked.length === 0) return 'pick at least one version';
+    if (asked.length > 8) return 'pick at most eight runs';
+    const runs: PlannedRun[] = [];
+    for (const [index, value] of asked.entries()) {
+      if (typeof value !== 'string' || !(value in site.versions)) return `unknown version "${String(value)}" for ${site.name}`;
+      const info = site.versions[value as SiteVersion];
+      runs.push({ version: value, code: info.code, name: info.name, fresh: fresh && index === 0 });
+    }
+    return { project: body.project, goal, live: true, guided: false, runs };
+  }
   if (guided) {
     return { project: 'shop', goal, live: body.live === true, guided: true, runs: GUIDED_STEPS.map((step) => ({ version: step.version, code: VERSION_INFO[step.version].code, name: step.title, fresh: step.fresh })) };
   }
@@ -166,6 +212,7 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
   let deployed: Version | null = null;
   let busy = false;
   let batchCount = 0;
+  const siteServers = new Map<string, Server>();
 
   const send = (message: Record<string, unknown>) => {
     const data = `data: ${JSON.stringify(message)}\n\n`;
@@ -183,6 +230,18 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
     versions: VERSION_INFO,
     guided: GUIDED_STEPS.map((step) => ({ version: step.version, code: VERSION_INFO[step.version].code, title: step.title, say: step.say })),
     liveAvailable: liveAvailable(),
+    projects: [
+      { id: 'shop', name: 'HackWave demo shop', detail: 'Checked against its order store', defaultGoal, examples, versions: VERSION_INFO },
+      ...(Object.entries(SITE_PROJECTS) as [SiteId, (typeof SITE_PROJECTS)[SiteId]][]).map(([id, site]) => ({
+        id,
+        name: site.name,
+        detail: site.detail,
+        defaultGoal: site.defaultGoal,
+        examples: site.examples,
+        versions: site.versions,
+        ports: SITES[id].ports,
+      })),
+    ],
     batches,
   });
   const setBusy = (value: boolean) => {
@@ -227,31 +286,20 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
     return { steps, skipped, onEvent };
   };
 
-  async function runShop(batchId: string, index: number, request: Extract<BatchRequest, { project: 'shop' }>, planned: PlannedRun): Promise<Record<string, unknown>> {
-    const version = planned.version as Version;
-    const origin = await deploy(version);
-    await resetStore(origin);
-    const known = knownIntentFor(root, request.goal);
-    // A goal we have recorded answers for replays them (offline); a new sentence is planned by the live model.
-    const goal = known?.goal ?? request.goal;
-    const base = known ?? checkout;
-    if (!base) throw new SetupError('intents/checkout.json is missing: it supplies the test data (card, address, phone)');
-    const { intent, notes } = typedIntent(goal, base.inputs, await fetchCatalog(origin));
-    const file = join(runsDir, 'typed', `${intent.id}.json`);
-    mkdirSync(join(runsDir, 'typed'), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(intent, null, 2)}\n`);
-    if (planned.fresh) for (const cache of [planCacheFile(root, intent.id), locatorCacheFile(root, intent.id)]) rmSync(cache, { force: true });
-    const mode = request.live || !known ? 'live' : 'replay';
-    send({ type: 'run', batchId, index, code: planned.code, name: planned.name, goal, target: address, mode, fresh: planned.fresh, notes });
-    const trace = tracer();
-    const result = await runIntent({ intentFile: file, target: origin, headed: options.headed, slowMo: options.slowMo, quiet: true, envOverride: { LLM_MODE: mode }, onEvent: trace.onEvent });
+  type Trace = ReturnType<typeof tracer>;
+  interface EntryBase {
+    index: number;
+    code: string;
+    name: string;
+    version: Version | null;
+  }
+
+  /** A result card for a verified run: the verdict, its checks, and the evidence. */
+  const verifiedEntry = (result: RunResult, base: EntryBase, mode: string, trace: Trace) => {
     const { verdict } = result;
     const finalShot = join(result.runDir, 'evidence', 'final.png');
     return {
-      index,
-      code: planned.code,
-      name: planned.name,
-      version,
+      ...base,
       color: verdict.color,
       kind: verdict.kind,
       summary: result.summary,
@@ -273,41 +321,128 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
       reportUrl: runUrl(result.runDir, 'report.html'),
       at: new Date().toISOString(),
     };
+  };
+
+  /** A result card for a run with no source of truth: explore mode, or a site whose data could not be read. */
+  const unverifiedEntry = (result: ExploreResult, base: EntryBase, trace: Trace) => ({
+    ...base,
+    color: 'UNVERIFIED',
+    kind: 'explore',
+    summary: `Unverified: ${outcomeLine(result)}. ${result.unverifiedReason && !result.unverifiedReason.startsWith('explore mode') ? `${result.unverifiedReason}.` : "Nothing checked the outcome against the site's data."}`,
+    whatChanged: [],
+    healer: outcomeLine(result),
+    claimed: result.finalHeading ?? result.finalTitle,
+    checks: [{ name: 'state', status: 'skipped', summary: result.unverifiedReason ?? 'no source of truth was read' }],
+    heals: result.shots.filter((shot) => shot.kind === 'healed').length,
+    replans: result.shots.filter((shot) => shot.kind === 'replanned').length,
+    llmCalls: result.llmCalls,
+    llmCached: 0,
+    mode: 'live',
+    seconds: null,
+    hypothesis: null,
+    steps: trace.steps,
+    skipped: trace.skipped,
+    shots: result.shots.map((shot) => ({ url: runUrl(result.runDir, shot.file), caption: shot.caption, kind: shot.kind, stepKey: shot.stepKey })),
+    finalShot: result.screenshot ? runUrl(result.runDir, result.screenshot) : null,
+    reportUrl: runUrl(result.runDir, 'report.html'),
+    at: new Date().toISOString(),
+  });
+
+  async function runShop(batchId: string, index: number, request: Extract<BatchRequest, { project: 'shop' }>, planned: PlannedRun): Promise<Record<string, unknown>> {
+    const version = planned.version as Version;
+    const origin = await deploy(version);
+    await resetStore(origin);
+    const known = knownIntentFor(root, request.goal);
+    // A goal we have recorded answers for replays them (offline); a new sentence is planned by the live model.
+    const goal = known?.goal ?? request.goal;
+    const base = known ?? checkout;
+    if (!base) throw new SetupError('intents/checkout.json is missing: it supplies the test data (card, address, phone)');
+    const { intent, notes } = typedIntent(goal, base.inputs, await fetchCatalog(origin));
+    const file = join(runsDir, 'typed', `${intent.id}.json`);
+    mkdirSync(join(runsDir, 'typed'), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(intent, null, 2)}\n`);
+    const mode = request.live || !known ? 'live' : 'replay';
+    // The recordings cover one path: the recorded goal planned from scratch on the first version, then onwards. Steps a
+    // live run saved for the same goal would send replay down questions nobody recorded, so a replayed test always
+    // starts from scratch.
+    const fresh = planned.fresh || (index === 0 && mode === 'replay');
+    if (fresh) for (const cache of [planCacheFile(root, intent.id), locatorCacheFile(root, intent.id)]) rmSync(cache, { force: true });
+    send({ type: 'run', batchId, index, code: planned.code, name: planned.name, goal, target: address, mode, fresh, notes });
+    const trace = tracer();
+    const result = await runIntent({ intentFile: file, target: origin, headed: options.headed, slowMo: options.slowMo, quiet: true, envOverride: { LLM_MODE: mode }, onEvent: trace.onEvent });
+    return verifiedEntry(result, { index, code: planned.code, name: planned.name, version }, mode, trace);
   }
 
   async function runWebsite(batchId: string, request: Extract<BatchRequest, { project: 'website' }>): Promise<Record<string, unknown>> {
-    if (!liveAvailable()) throw new SetupError('a website is explored by the live model: put LLM_API_KEY (and the models) in .env');
-    const intent = exploreIntent(request.goal, request.query ? { query: request.query } : {});
-    if (request.runs[0]?.fresh) for (const cache of [planCacheFile(root, intent.id), locatorCacheFile(root, intent.id)]) rmSync(cache, { force: true });
-    send({ type: 'run', batchId, index: 0, code: 'W', name: new URL(request.url).host, goal: request.goal, target: request.url, mode: 'live', fresh: request.runs[0]?.fresh ?? false, notes: [] });
-    const trace = tracer();
-    const result = await exploreGoal({ intent, target: request.url, headed: options.headed, slowMo: options.slowMo, quiet: true, envOverride: { LLM_MODE: 'live' }, onEvent: trace.onEvent });
-    return {
-      index: 0,
-      code: 'W',
-      name: new URL(request.url).host,
-      version: null,
-      color: 'UNVERIFIED',
-      kind: 'explore',
-      summary: `Unverified: ${outcomeLine(result)}. Nothing checked the outcome against the site's data.`,
-      whatChanged: [],
-      healer: outcomeLine(result),
-      claimed: result.finalHeading ?? result.finalTitle,
-      checks: [{ name: 'state', status: 'skipped', summary: 'explore mode has no source of truth to read' }],
-      heals: result.shots.filter((shot) => shot.kind === 'healed').length,
-      replans: result.shots.filter((shot) => shot.kind === 'replanned').length,
-      llmCalls: result.llmCalls,
-      llmCached: 0,
-      mode: 'live',
-      seconds: null,
-      hypothesis: null,
-      steps: trace.steps,
-      skipped: trace.skipped,
-      shots: result.shots.map((shot) => ({ url: runUrl(result.runDir, shot.file), caption: shot.caption, kind: shot.kind, stepKey: shot.stepKey })),
-      finalShot: result.screenshot ? runUrl(result.runDir, result.screenshot) : null,
-      reportUrl: runUrl(result.runDir, 'report.html'),
-      at: new Date().toISOString(),
+    if (!liveAvailable()) throw new SetupError('a website is planned by the live model: put LLM_API_KEY (and the models) in .env');
+    const origin = new URL(request.url).origin;
+    const base: EntryBase = { index: 0, code: 'W', name: new URL(request.url).host, version: null };
+    const fresh = request.runs[0]?.fresh ?? false;
+    const forget = (id: string) => {
+      if (fresh) for (const cache of [planCacheFile(root, id), locatorCacheFile(root, id)]) rmSync(cache, { force: true });
     };
+    const trace = tracer();
+
+    // An address a project in projects/ claims has a source of truth: run the goal as a verified test. If its data
+    // cannot be read after all, runGoal carries on unverified and says why.
+    const project = projectFor(loadProjects(root), origin);
+    if (project) {
+      const store = Object.keys(project.stores)[0] ?? 'orders';
+      const { intent, notes } = typedIntent(request.goal, project.inputs ?? checkout?.inputs ?? {}, await fetchCatalog(origin, fetch, project.catalog), store);
+      // Each project keeps its own learned steps: the same sentence on two apps must not share a plan.
+      intent.id = intent.id.replace(/^typed-/, `typed-${project.id}-`);
+      const file = join(runsDir, 'typed', `${intent.id}.json`);
+      mkdirSync(join(runsDir, 'typed'), { recursive: true });
+      writeFileSync(file, `${JSON.stringify(intent, null, 2)}\n`);
+      forget(intent.id);
+      send({ type: 'run', batchId, index: 0, code: 'W', name: base.name, goal: request.goal, target: request.url, mode: 'live', fresh, notes: [`project: ${project.name} (projects/${project.id}.json)`, ...notes] });
+      const result = await runGoal({ intentFile: file, target: request.url, headed: options.headed, slowMo: options.slowMo, quiet: true, envOverride: { LLM_MODE: 'live' }, onEvent: trace.onEvent });
+      return isVerified(result) ? verifiedEntry(result, base, 'live', trace) : unverifiedEntry(result, base, trace);
+    }
+
+    const intent = exploreIntent(request.goal, request.query ? { query: request.query } : {});
+    forget(intent.id);
+    send({ type: 'run', batchId, index: 0, code: 'W', name: base.name, goal: request.goal, target: request.url, mode: 'live', fresh, notes: [] });
+    const result = await exploreGoal({ intent, target: request.url, headed: options.headed, slowMo: options.slowMo, quiet: true, envOverride: { LLM_MODE: 'live' }, onEvent: trace.onEvent });
+    return unverifiedEntry(result, base, trace);
+  }
+
+  /**
+   * The demo site version at its fixed port (the port its project file matches): reused when something already serves it
+   * there (pnpm sites), started by the app otherwise.
+   */
+  async function ensureSite(site: SiteId, version: SiteVersion): Promise<string> {
+    const port = SITES[site].ports[version];
+    const url = `http://localhost:${port}`;
+    const answers = await fetch(url, { signal: AbortSignal.timeout(2000) }).then((response) => response.ok).catch(() => false);
+    if (answers) return url;
+    try {
+      siteServers.set(`${site}:${version}`, await serveSite(site, version, port));
+    } catch (error) {
+      throw new SetupError(`${SITE_PROJECTS[site].name} ${version} needs port ${port}, which another program holds (${error instanceof Error ? error.message : String(error)})`, { cause: error });
+    }
+    send({ type: 'line', tone: 'warn', text: `▶ serving ${SITE_PROJECTS[site].name} ${version} at ${url} ...` });
+    return url;
+  }
+
+  async function runSite(batchId: string, index: number, request: Extract<BatchRequest, { project: SiteId }>, planned: PlannedRun): Promise<Record<string, unknown>> {
+    if (!liveAvailable()) throw new SetupError(`${SITE_PROJECTS[request.project].name} is tested with the live model: put LLM_API_KEY (and the models) in .env`);
+    const version = planned.version as SiteVersion;
+    const target = await ensureSite(request.project, version);
+    const project = loadProjects(root).find((candidate) => candidate.id === request.project);
+    if (!project) throw new SetupError(`projects/${request.project}.json is missing`);
+    const store = Object.keys(project.stores)[0] ?? 'orders';
+    const { intent, notes } = typedIntent(request.goal, project.inputs ?? {}, await fetchCatalog(target, fetch, project.catalog), store);
+    // Each project keeps its own learned steps: the same sentence on two apps must not share a plan.
+    intent.id = intent.id.replace(/^typed-/, `typed-${project.id}-`);
+    const file = join(runsDir, 'typed', `${intent.id}.json`);
+    mkdirSync(join(runsDir, 'typed'), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(intent, null, 2)}\n`);
+    if (planned.fresh) for (const cache of [planCacheFile(root, intent.id), locatorCacheFile(root, intent.id)]) rmSync(cache, { force: true });
+    send({ type: 'run', batchId, index, code: planned.code, name: planned.name, goal: request.goal, target, mode: 'live', fresh: planned.fresh, notes: [`project: ${project.name} (projects/${project.id}.json)`, ...notes] });
+    const trace = tracer();
+    const result = await runIntent({ intentFile: file, target, headed: options.headed, slowMo: options.slowMo, quiet: true, envOverride: { LLM_MODE: 'live' }, onEvent: trace.onEvent });
+    return verifiedEntry(result, { index, code: planned.code, name: planned.name, version: null }, 'live', trace);
   }
 
   async function runBatch(request: BatchRequest): Promise<void> {
@@ -317,7 +452,15 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
       id,
       goal: request.goal,
       project: request.project,
-      target: request.project === 'website' ? request.url : address,
+      target: request.project === 'website' ? request.url : request.project === 'shop' ? address : `http://localhost:${SITES[request.project].ports.v1}`,
+      projectName: request.project === 'website' ? 'Website' : request.project === 'shop' ? 'HackWave demo shop' : SITE_PROJECTS[request.project].name,
+      // Where the test ran, in the page's words.
+      targetLabel:
+        request.project === 'website'
+          ? `Website: ${request.url} (unverified)`
+          : request.project === 'shop'
+            ? `HackWave demo shop at ${address}, one address, redeployed for each version`
+            : `${SITE_PROJECTS[request.project].name}: ${request.runs.map((run) => `${run.code} at localhost:${SITES[request.project as SiteId].ports[run.version as SiteVersion]}`).join(', ')}`,
       guided: request.guided,
       plan: request.runs.map((run) => ({ code: run.code, name: run.name, version: run.version })),
       runs: [],
@@ -332,6 +475,12 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
         const entry = await runWebsite(id, request);
         batch.runs.push(entry);
         send({ type: 'result', batchId: id, entry });
+      } else if (request.project !== 'shop') {
+        for (const [index, planned] of request.runs.entries()) {
+          const entry = await runSite(id, index, request, planned);
+          batch.runs.push(entry);
+          send({ type: 'result', batchId: id, entry });
+        }
       } else {
         for (const [index, planned] of request.runs.entries()) {
           const entry = await runShop(id, index, request, planned);
@@ -457,6 +606,7 @@ export async function startUiServer(options: UiOptions): Promise<UiServer> {
       for (const client of clients) client.end();
       await new Promise((resolveClose) => server.close(resolveClose));
       if (shop) await shop.stop();
+      await Promise.all([...siteServers.values()].map((site) => new Promise((resolveClose) => site.close(resolveClose))));
     },
   };
 }

@@ -66,7 +66,10 @@ export function describeEvent(event: EngineEvent): EventLine[] {
       line('dim', `plan cached in ${e.file}`);
       break;
     case 'verifier_baseline':
-      line('dim', `verifier: baseline ${e.count} record(s), max id ${e.maxId ?? 'none'}`);
+      line('dim', `verifier: baseline ${e.count} record(s), max id ${e.maxId ?? 'none'}${e.project ? ` (project ${e.project})` : ''}`);
+      break;
+    case 'verifier_unavailable':
+      line('dim', `verifier: ${e.reason}; the result will be tagged unverified`);
       break;
     case 'navigated':
       line('dim', `opened ${e.url}`);

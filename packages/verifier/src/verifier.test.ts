@@ -169,9 +169,28 @@ describe('createVerifier against a real page', () => {
     expect(result.newRecordId).toBe(4821);
   });
 
+  it('waits for a confirmation that arrives a moment after the save (the app navigates once its request returns)', async () => {
+    await page.setContent('<main><h1>Checkout</h1><button disabled>Place order</button></main>');
+    await page.evaluate("setTimeout(() => { document.body.innerHTML = '<main><h1>Order confirmed #4821</h1></main>'; }, 600)");
+    const verifier = createVerifier(intent, { origin: 'http://test', evidenceDir, defaultPollMs: 300, pollIntervalMs: 20, store: fakeStore([[], [order(4821)]]) });
+    await verifier.baseline();
+    const result = await verifier.verify(page, record());
+    expect([result.state.status, result.binding.status]).toEqual(['pass', 'pass']);
+    expect(result.finalHeading).toBe('Order confirmed #4821');
+  });
+
+  it('quotes the confirmation a one-page app shows, not its hero heading (narration only)', async () => {
+    await page.setContent('<main><h1>Good things. Better finds.</h1><div role="dialog" aria-modal="true"><p>ORDER CONFIRMED</p><h2>Nice choice.</h2><p>Order #1001 is confirmed for Kartik Test.</p></div></main>');
+    const verifier = createVerifier(intent, { origin: 'http://test', evidenceDir, defaultPollMs: 200, pollIntervalMs: 20, bindingWaitMs: 200, store: fakeStore([[]]) });
+    await verifier.baseline();
+    const result = await verifier.verify(page, record());
+    expect(result.finalHeading).toBe('Order #1001 is confirmed for Kartik Test.');
+    expect(result.state.status).toBe('fail');
+  });
+
   it('catches an order saved but never confirmed to the user', async () => {
     await page.setContent('<main><h1>Checkout</h1><div role="alert">Something went wrong</div></main>');
-    const verifier = createVerifier(intent, { origin: 'http://test', evidenceDir, defaultPollMs: 300, pollIntervalMs: 20, store: fakeStore([[], [order(4821)]]) });
+    const verifier = createVerifier(intent, { origin: 'http://test', evidenceDir, defaultPollMs: 300, pollIntervalMs: 20, bindingWaitMs: 400, store: fakeStore([[], [order(4821)]]) });
     await verifier.baseline();
     const result = await verifier.verify(page, record({ healerBelievedDone: { believed: false, atStep: 12, stepKey: 'place-order.submit' } }));
     expect(result.state.status).toBe('pass');

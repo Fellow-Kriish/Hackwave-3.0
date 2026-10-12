@@ -4,7 +4,9 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig([
-  globalIgnores(['**/node_modules/**', '**/dist/**', 'runs/**', 'apps/shop/data/**']),
+  // The demo sites' v2 and v3 scripts are third-party test subjects, kept as their authors wrote them apart from the
+  // fixes listed in apps/demo-sites/README.md; v1 (rewritten here) and the server are linted.
+  globalIgnores(['**/node_modules/**', '**/dist/**', 'runs/**', 'apps/shop/data/**', 'apps/demo-sites/*/v2/**', 'apps/demo-sites/*/v3/**']),
   js.configs.recommended,
   tseslint.configs.recommended,
   {
@@ -14,6 +16,10 @@ export default defineConfig([
     rules: {
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
+  },
+  {
+    files: ['apps/demo-sites/*/v1/**/*.js'],
+    languageOptions: { sourceType: 'script', globals: { ...globals.browser } },
   },
   {
     files: ['apps/shop/src/**/*.{ts,tsx}'],

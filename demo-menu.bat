@@ -52,6 +52,7 @@ echo.
 echo    YOUR OWN TEST  (needs internet and the key in .env: a new sentence is planned by the AI)
 echo     T  Type a goal in plain words and test it, e.g. "Complete checkout with a valid credit card"
 echo     E  Explore ANY website (e.g. amazon.in): it plans and clicks, but checks nothing, so UNVERIFIED
+echo     D  Start the demo sites: ShopSphere (5181-5183) and Harbor ^& Pine (5191-5193)
 echo.
 echo    SHOW MORE
 echo     7  Readable errors: lint a deliberately broken test file
@@ -76,6 +77,7 @@ if /i "%choice%"=="F" goto demosameurl
 if /i "%choice%"=="U" goto webapp
 if /i "%choice%"=="T" goto typegoal
 if /i "%choice%"=="E" goto explore
+if /i "%choice%"=="D" goto demosites
 if /i "%choice%"=="6" goto reports
 if /i "%choice%"=="7" goto lint
 if /i "%choice%"=="8" goto evalacts
@@ -138,10 +140,20 @@ goto pause
 
 :webapp
 rem Runs in its own window (it serves the page until that window is closed) with its own shop; the three shops are not needed.
-start "HackWave web app" cmd /k pnpm -s ui
+start "HackWave web app" cmd /c "pnpm -s ui || pause"
 echo.
 echo   The web app is starting in a new window and will open in your browser at http://localhost:4321
 echo   Close that window to stop it.
+goto pause
+
+:demosites
+rem Static sites with three versions each; they save in the browser, and their project files tell the verifier where.
+start "HackWave demo sites" cmd /c "pnpm -s sites || pause"
+echo.
+echo   The demo sites are starting in a new window (close it to stop them):
+echo     ShopSphere     v1 http://localhost:5181   v2 :5182   v3 :5183 (bug: orders not saved)
+echo     Harbor ^& Pine  v1 http://localhost:5191   v2 :5192   v3 :5193 (bug: reservations not saved)
+echo   Try:  pnpm engine try "Buy the Cloud Wireless Headphones" --target http://localhost:5182 --headed
 goto pause
 
 :explore

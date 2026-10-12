@@ -188,6 +188,39 @@ recording, so `try` calls the model live: it needs `LLM_API_KEY` in `.env` (the 
 scratch tests under `runs/typed/`; `--save` keeps one as `intents/<id>.json`, a test like any other. In
 `demo-menu.bat` it is option T.
 
+## Projects: where each app's truth lives
+
+Each app HackWave can verify has a file in `projects/` (the demo shop's is `projects/demo-shop.json`). At the start of
+every run the engine picks the project whose `match` covers the target address and loads its verifier from it, so a new
+app is added by adding its file; no code changes. A project says:
+
+- `match`: the addresses it is served at; `*` stands for any port or one subdomain label (`https://*.example.com`);
+- `stores`: per store name an oracle uses (`orders`), where the records are read (`baseUrl`, `list`, `get` with
+  `{id}`), request `headers` (write secrets as `"env:NAME"`; they are read from the environment and never stored),
+  where the list sits in the response (`recordsPath`), and which fields hold the id, item names, quantities, total and
+  card digits (paths like `lines[].product.title`);
+- `catalog`: where the product list is read, for goals typed in plain words.
+
+`pnpm engine projects https://staging.example.com` shows which project a run there would load. With no matching project
+the verifier reads `<target>/api/<store>` as before. When that does not exist either, `try` no longer stops with an
+error: the run carries on and, if it completes, passes with a small "unverified" tag (never GREEN); `run` and the evals
+stay strict. A broken project file
+stops every run with a readable error rather than being skipped.
+
+The success check for a typed goal checks only what the goal says: named products with their quantities and catalogue
+total; a count without names ("order 2 items") as that many units at catalogue prices; and with neither, a total equal to
+the catalogue prices of whatever was bought. The verifier checks the catalogue rule in code (`itemCount` and `prices` in
+the oracle's match).
+
+## More apps to test: ShopSphere and Harbor & Pine
+
+`pnpm sites` serves two more apps, three versions each (an original design, a redesign, and the redesign with a
+"confirmed but not saved" bug): ShopSphere on ports 5181-5183 and Harbor & Pine on 5191-5193. They have no server and
+save to the browser, so their project files use a `browser-storage` store: the verifier reads `localStorage` from the
+test's own page. Typed goals use each project's own test data and catalogue (`inputs` and `catalog.items` in its project
+file). Under live HackWave the sequence v1, v2, v3 comes out GREEN, AMBER (healed), RED on both. Details and every change
+from the team's originals: [apps/demo-sites/README.md](apps/demo-sites/README.md). In `demo-menu.bat` it is option D.
+
 ## Explore any website (no verifier: UNVERIFIED)
 
 ```sh
@@ -195,8 +228,7 @@ pnpm engine explore "search for the query and add the first result to the cart" 
 ```
 
 Explore mode runs the same planner, ladder and healing on any website, in a visible browser, but there is no source of
-truth to read, so nothing checks the outcome: the result is **UNVERIFIED**, a walkthrough rather than a test, and never a
-pass. `--input key=value` (repeatable) gives it words to type; the AI sees only the key. Differences from a test: the
+truth to read, so nothing checks the outcome: a run that completes passes with a small "unverified" tag, and is never GREEN. `--input key=value` (repeatable) gives it words to type; the AI sees only the key. Differences from a test: the
 site may load images and scripts from its other domains (navigation still stays on the site), links open in the same
 tab, an oversized page is trimmed to its top (closed dropdowns hidden) instead of refused, and the budgets are 180 s per
 run and 20 s per step. Plans and locators are cached as `explore-*` scratch files. It needs `LLM_API_KEY`; a big page

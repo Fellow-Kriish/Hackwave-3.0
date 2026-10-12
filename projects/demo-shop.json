@@ -1,0 +1,27 @@
+{
+  "id": "demo-shop",
+  "name": "HackWave demo shop",
+  "match": ["http://localhost:*", "http://127.0.0.1:*"],
+  "stores": {
+    "orders": {
+      "baseUrl": null,
+      "list": "/api/orders",
+      "get": "/api/orders/{id}",
+      "headers": {},
+      "recordsPath": null,
+      "fields": {
+        "id": "id",
+        "items": "items[].name",
+        "quantity": "items[].qty",
+        "total": "total",
+        "cardLast4": "cardLast4"
+      }
+    }
+  },
+  "catalog": {
+    "list": "/api/products",
+    "recordsPath": null,
+    "name": "name",
+    "price": "price"
+  }
+}
